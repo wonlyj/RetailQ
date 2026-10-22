@@ -130,7 +130,7 @@ GPT、Claude、DeepSeek、Ollama 的可切换性以指定端点支持所需 Open
 
 配置包含 `OPENAI_BASE_URL`、`OPENAI_API_KEY`、`OPENAI_MODEL`、上述预算、`STRUCTURED_OUTPUT_METHOD`、`MODEL_TIMEOUT_SECONDS`（默认 60 秒）。首章默认禁用 SDK 自动重试，超时 / 限流明确暴露。密钥不得写进日志或错误响应。默认绑定本机地址，具体启动命令在 README 提供。
 
-当前可用 `python` 为 3.13.9。提案使用项目独立 `.venv`，不修改全局 Python 或 ML 环境；依赖使用实现时查证可安装的稳定版本并锁定实际解析结果，FastAPI 必须包含此次查证的 `fastapi.sse` 接口，LangChain 使用已查证的 langchain-core / langchain-openai 接口。如版本不匹配先更新证据与计划，技术路线冲突则询问用户。设计批准前不安装依赖。
+当前可用 项目解释器要求为 Python 3.12。提案使用项目独立 `.venv`，不修改全局 Python 或 ML 环境；依赖使用实现时查证可安装的稳定版本并锁定实际解析结果，FastAPI 必须包含此次查证的 `fastapi.sse` 接口，LangChain 使用已查证的 langchain-core / langchain-openai 接口。如版本不匹配先更新证据与计划，技术路线冲突则询问用户。设计批准前不安装依赖。
 
 ## 实现边界与验证
 

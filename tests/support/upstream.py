@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 
 class ControlledUpstream:
-    def __init__(self, *, status=200, text=None, chunks=None, gated=False, finish_reason="stop", tool=False):
+    def __init__(self, *, status=200, text=None, chunks=None, gated=False, finish_reason="stop", tool=False, nonstream_delay=0):
         self.status = status
         self.text = text if text is not None else json.dumps({
             "order_id": "00123", "request_type": "exchange", "expected_solution": "换成42码",
@@ -16,6 +16,7 @@ class ControlledUpstream:
         self.gated = gated
         self.finish_reason = finish_reason
         self.tool = tool
+        self.nonstream_delay = nonstream_delay
         self.requests = []
         self.release = threading.Event()
         self.finished = threading.Event()
@@ -29,6 +30,8 @@ class ControlledUpstream:
             if self.status != 200:
                 return JSONResponse({"error": {"message": "sensitive-upstream-secret", "type": "test_error"}}, status_code=self.status)
             if not body.get("stream"):
+                if self.nonstream_delay:
+                    await asyncio.sleep(self.nonstream_delay)
                 return {"id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test-model",
                         "choices": [{"index": 0, "message": {"role": "assistant", "content": self.text}, "finish_reason": "stop"}]}
 

@@ -9,10 +9,10 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import ValidationError
 
 from retailq.config import Settings
-from retailq.context import PreparedChat, prepare_chat
+from retailq.context import PreparedChat, prepare_chat, prepare_extraction
 from retailq.errors import ServiceError
 from retailq.gateway import ModelGateway, OpenAIModelGateway, public_error, unsupported
-from retailq.schemas import ChatRequest
+from retailq.schemas import AfterSalesResult, ChatRequest, ExtractRequest
 
 
 def get_gateway(request: Request) -> ModelGateway:
@@ -82,6 +82,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             with anyio.move_on_after(5, shield=True):
                 await stream.aclose()
+
+    @application.post("/api/after-sales/extract", response_model=AfterSalesResult)
+    async def extract_after_sales(
+        body: ExtractRequest, request: Request,
+        gateway: Annotated[ModelGateway, Depends(get_gateway)],
+    ) -> AfterSalesResult:
+        messages = prepare_extraction(body.description, request.app.state.settings)
+        return await gateway.extract(messages)
 
     return application
 

@@ -40,6 +40,7 @@
 - `meta` 在上游调用前返回 `input_tokens_estimate` 和 `dropped_history_messages`；`done` 只在上游正常结束且回复非空时返回 `{"finish_reason":"stop"}` 或模型实际结束原因。`length` 等截断结束原因必须原样暴露，客户端可据此决定是否将该回复加入下一轮历史。不返回或伪造精确 usage。
 - 参数 / token 预算错误在建立流前返回 HTTP 422；配置缺失返回 503。流建立后上游异常发送一个脱敏 `error` 事件并结束，不发送 done，不把部分回复视作完整历史。客户端断开时取消并关闭上游迭代器。
 - 未预期的空回复、非文本输出或工具调用输出视作上游错误，不能成功结束或执行工具。事件不提供断点续传或自动重试；禁止为已开始输出的回复重试以免重复文本。
+- 独立审查补充：迭代器耗尽或 HTTP EOF 本身不代表模型正常结束。必须观察到模型的非空结束原因才能发 done；缺少结束原因时发 error，不能默认 stop。
 
 ### `POST /api/after-sales/extract`
 
@@ -61,6 +62,7 @@
 - 三个字段始终存在，不额外输出解释。输入中夹带的指令只作为待提取文本，不能修改 schema 或角色约束。
 - 使用 Pydantic schema 与 `ChatOpenAI.with_structured_output`，异步调用。`.env` 的 `STRUCTURED_OUTPUT_METHOD` 仅允许 `json_mode`（默认，Prompt 显式描述 JSON schema）或 `json_schema`。显式传 method，不能依赖随版本变化的默认值；不用 function_calling，不绑定工具。
 - 不能解析或 schema 校验失败返回脱敏 502；上游超时返回 504；鉴权、限流及其他上游故障返回脱敏 502，保留稳定错误码用于区分。返回失败，不把未校验的模型文本伪装成 JSON 成功响应。
+- 独立审查补充：保留 with_structured_output，额外检查 raw content 是完整、单一合法 JSON 对象并通过同一 schema；不接受解析器自动补闭引号 / 括号或截去尾随对象才成功的结果。
 
 ### `GET /health`
 

@@ -60,6 +60,7 @@ def test_pre_stream_errors_do_not_call_model():
     ({"status": 500}, "error"), ({"chunks": []}, "error"),
     ({"tool": True}, "error"), ({"finish_reason": "length"}, "done"),
     ({"gated": True}, "error"),
+    ({"terminal": False, "chunks": ["partial"]}, "error"),
 ])
 def test_stream_error_and_finish_reason(kwargs, last_event):
     upstream = ControlledUpstream(**kwargs)

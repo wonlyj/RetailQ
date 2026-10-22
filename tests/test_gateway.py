@@ -143,3 +143,37 @@ async def test_library_must_not_fallback_to_tool_calling():
         assert exc.value.code == "structured_mode_unsupported"
     finally:
         await gateway.aclose()
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+async def test_text_without_finish_reason_is_not_complete(terminal):
+    from retailq.gateway import OpenAIModelGateway
+    upstream = ControlledUpstream(chunks=["partial text"], terminal=terminal, finish_reason=None)
+    with run_server(upstream.app) as url:
+        gateway = OpenAIModelGateway(settings_for(url))
+        try:
+            with pytest.raises(ServiceError) as exc:
+                async for _ in gateway.stream([HumanMessage(content="hi")]):
+                    pass
+            assert exc.value.code == "incomplete_upstream_stream"
+            assert upstream.request_count == 1
+        finally:
+            await gateway.aclose()
+
+
+@pytest.mark.parametrize("raw", [
+    '{"order_id":"00123","request_type":"refund","expected_solution":"partial',
+    '{"order_id":"00123","request_type":"refund","expected_solution":"退款"',
+    '{"order_id":"00123","request_type":"refund","expected_solution":"退款"}{"other":1}',
+])
+async def test_structured_output_requires_complete_single_json(raw):
+    from retailq.gateway import OpenAIModelGateway
+    upstream = ControlledUpstream(text=raw)
+    with run_server(upstream.app) as url:
+        gateway = OpenAIModelGateway(settings_for(url))
+        try:
+            with pytest.raises(ServiceError) as exc:
+                await gateway.extract([HumanMessage(content="JSON")])
+            assert exc.value.code == "structured_output_invalid"
+        finally:
+            await gateway.aclose()

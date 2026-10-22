@@ -65,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         })
         stream = gateway.stream(prepared.messages)
         seen_text = False
-        finish_reason = "stop"
+        finish_reason = None
         try:
             async for chunk in stream:
                 if chunk.text:
@@ -75,6 +75,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     finish_reason = chunk.finish_reason
             if not seen_text:
                 raise unsupported()
+            if finish_reason is None:
+                raise ServiceError("incomplete_upstream_stream", 502, "模型回复未完整结束，请重试。")
             yield ServerSentEvent(event="done", data={"finish_reason": finish_reason})
         except Exception as exc:
             error = public_error(exc)

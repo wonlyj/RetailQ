@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 
 class ControlledUpstream:
-    def __init__(self, *, status=200, text=None, chunks=None, gated=False, finish_reason="stop", tool=False, nonstream_delay=0):
+    def __init__(self, *, status=200, text=None, chunks=None, gated=False, finish_reason="stop", tool=False, nonstream_delay=0, terminal=True):
         self.status = status
         self.text = text if text is not None else json.dumps({
             "order_id": "00123", "request_type": "exchange", "expected_solution": "换成42码",
@@ -17,6 +17,7 @@ class ControlledUpstream:
         self.finish_reason = finish_reason
         self.tool = tool
         self.nonstream_delay = nonstream_delay
+        self.terminal = terminal
         self.requests = []
         self.release = threading.Event()
         self.finished = threading.Event()
@@ -49,8 +50,9 @@ class ControlledUpstream:
                                           "function": {"name": "forbidden", "arguments": "{}"}}]})
                         else:
                             yield event({"content": chunk})
-                    yield event({}, self.finish_reason)
-                    yield "data: [DONE]\n\n"
+                    if self.terminal:
+                        yield event({}, self.finish_reason)
+                        yield "data: [DONE]\n\n"
                     self.finished.set()
                 finally:
                     self.closed.set()

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import warnings
 from collections.abc import AsyncIterator
 from contextlib import aclosing
@@ -68,6 +69,7 @@ class OpenAIModelGateway:
 
     async def stream(self, messages: list[BaseMessage]) -> AsyncIterator[ModelChunk]:
         seen_text = False
+        seen_finish = False
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 async with aclosing(self.model.astream(messages)) as stream:
@@ -81,10 +83,14 @@ class OpenAIModelGateway:
                             raise unsupported()
                         if chunk.content:
                             seen_text = True
+                        if isinstance(reason, str) and reason:
+                            seen_finish = True
                         if chunk.content or reason:
                             yield ModelChunk(chunk.content, reason)
                 if not seen_text:
                     raise unsupported()
+                if not seen_finish:
+                    raise ServiceError("incomplete_upstream_stream", 502, "模型回复未完整结束，请重试。")
         except Exception as exc:
             raise public_error(exc) from None
 
@@ -107,6 +113,15 @@ class OpenAIModelGateway:
             raw = output["raw"]
             if raw.tool_calls or raw.additional_kwargs.get("tool_calls"):
                 raise unsupported()
-            return AfterSalesResult.model_validate(output["parsed"])
+            # LangChain's JSON parser can repair partial JSON. Validate the raw
+            # syntax as well, while retaining with_structured_output as parser.
+            try:
+                strict_result = AfterSalesResult.model_validate(json.loads(raw.content))
+                parsed = AfterSalesResult.model_validate(output["parsed"])
+                if strict_result != parsed:
+                    raise ValueError("raw and parsed results differ")
+            except (ValueError, TypeError):
+                raise ServiceError("structured_output_invalid", 502, "模型未返回完整、单一且有效的售后 JSON。") from None
+            return parsed
         except Exception as exc:
             raise public_error(exc) from None

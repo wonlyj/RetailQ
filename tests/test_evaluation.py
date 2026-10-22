@@ -15,7 +15,8 @@ def test_eval_scoring_and_incomplete():
     assert all(checks.values())
     assert not all(score_extraction({**actual, "order_id": "123"}, case).values())
     assert not all(score_extraction({**actual, "expected_solution": "换成40码"}, case).values())
-    report = {"cases": [{"auto_checks": checks, "review": {"status": "pending", "reason": ""}}]}
+    report = {"expected_case_ids": ["one"], "run_completed": True,
+              "cases": [{"id": "one", "auto_checks": checks, "review": {"status": "pending", "reason": ""}}]}
     assert summarize_report(report)["status"] == "pending"
     report["cases"][0]["review"] = {"status": "pass", "reason": "释义与42码诉求一致"}
     assert summarize_report(report)["status"] == "pass"
@@ -51,3 +52,29 @@ def test_empty_or_unreviewed_report_cannot_pass():
     from scripts.evaluate import summarize_report
     assert summarize_report({"cases": []})["status"] == "pending"
     assert summarize_report({"cases": [{"auto_checks": {}, "review": {"status": "pass", "reason": ""}}]})["status"] != "pass"
+
+
+def test_partial_duplicate_and_unavailable_reports_cannot_pass():
+    from scripts.evaluate import summarize_report
+    first = {"id": "one", "auto_checks": {"api": True}, "review": {"status": "pass", "reason": "核对通过"}}
+    second = {**first, "id": "two"}
+    report = {"expected_case_ids": ["one", "two"], "run_completed": True, "cases": [first, second]}
+    assert summarize_report(report)["status"] == "pass"
+    assert summarize_report({**report, "cases": [first]})["status"] != "pass"
+    assert summarize_report({**report, "cases": [first, first]})["status"] != "pass"
+    assert summarize_report({**report, "run_completed": False})["status"] == "pending"
+    assert summarize_report({**report, "unavailable": "model_not_configured"})["status"] != "pass"
+    assert summarize_report({"cases": [first]})["status"] != "pass"
+
+
+@pytest.mark.anyio
+async def test_evaluation_persists_manifest_before_unavailable(tmp_path):
+    from retailq.config import Settings
+    from scripts.evaluate import evaluate_cases, summarize_report
+    with run_server(create_app(Settings(_env_file=None))) as api:
+        report = await evaluate_cases(api, tmp_path)
+    assert len(report.get("expected_case_ids", [])) == 24
+    assert report["run_completed"] is False
+    assert report["unavailable"] == "model_not_configured"
+    assert summarize_report(report)["status"] == "pending"
+    assert (tmp_path / "report.json").is_file()

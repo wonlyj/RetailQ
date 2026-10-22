@@ -130,3 +130,16 @@ async def test_consumer_closes_stream_without_finishing():
         finally:
             upstream.release.set()
             await gateway.aclose()
+
+
+async def test_library_must_not_fallback_to_tool_calling():
+    from retailq.gateway import OpenAIModelGateway
+    settings = Settings(_env_file=None, openai_base_url="http://127.0.0.1:1/v1", openai_api_key="fixture",
+                        openai_model="gpt-3.5-turbo", structured_output_method="json_schema")
+    gateway = OpenAIModelGateway(settings)
+    try:
+        with pytest.raises(ServiceError) as exc:
+            await gateway.extract([HumanMessage(content="JSON")])
+        assert exc.value.code == "structured_mode_unsupported"
+    finally:
+        await gateway.aclose()

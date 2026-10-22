@@ -1,4 +1,5 @@
 import asyncio
+import warnings
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -60,9 +61,6 @@ class OpenAIModelGateway:
             use_responses_api=False, stream_usage=False,
             http_client=self.http, http_async_client=self.http_async,
         )
-        self.structured = self.model.with_structured_output(
-            AfterSalesResult, method=settings.structured_output_method, include_raw=True,
-        )
 
     async def aclose(self) -> None:
         await self.http_async.aclose()
@@ -92,8 +90,18 @@ class OpenAIModelGateway:
 
     async def extract(self, messages: list[BaseMessage]) -> AfterSalesResult:
         try:
+            # Some LangChain versions warn and silently substitute tool calling.
+            # Treat that specific fallback as unsupported before any request.
+            with warnings.catch_warnings():
+                warnings.filterwarnings("error", message="(?s).*Overriding to method=", category=UserWarning)
+                try:
+                    structured = self.model.with_structured_output(
+                        AfterSalesResult, method=self.settings.structured_output_method, include_raw=True,
+                    )
+                except UserWarning:
+                    raise ServiceError("structured_mode_unsupported", 502, "当前模型不支持指定的无工具结构化模式，请核查配置。") from None
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                output = await self.structured.ainvoke(messages)
+                output = await structured.ainvoke(messages)
             if output.get("parsing_error") or output.get("parsed") is None:
                 raise ServiceError("structured_output_invalid", 502, "模型未返回有效的售后结构，请核查模型能力。")
             raw = output["raw"]

@@ -34,7 +34,15 @@ MODEL_TIMEOUT_SECONDS=60
 & $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000
 ```
 
-另开终端进入项目目录。`GET /health` 只检查存活和配置完整性，不证明模型可用。接口交互文档见 [本机 Swagger](http://127.0.0.1:8000/docs)。
+服务启动后，打开 [聊天页面](http://127.0.0.1:8000/)。页面和 API 共用一个 Python 进程，无需安装 Node.js 或单独启动前端。也可另开 PowerShell 执行：
+
+```powershell
+Start-Process 'http://127.0.0.1:8000/'
+```
+
+聊天页面支持实时流式回复、新建及切换对话、停止回复和复制。Enter 发送，Shift+Enter 换行。对话保存在当前标签页的 sessionStorage，刷新可恢复，关闭标签页后不保留；最多保留 20 个会话，每个会话 100 轮展示记录。后续请求最多携带最近 50 轮完整成功的对话，停止、失败或截断的轮次仅展示，不加入上下文；服务端还会按 token 预算裁剪。
+
+另开终端进入项目目录可执行下面的 curl 验收。`GET /health` 只检查存活和配置完整性，不证明模型可用。接口交互文档见 [本机 Swagger](http://127.0.0.1:8000/docs)。
 
 ## curl 验收
 
@@ -98,6 +106,22 @@ smoke 自动完成真实第一轮 → 将真实回复写入历史 → 第二轮�
 评估开始前会保存预期案例 ID 清单；只有每个 ID 恰好执行一次、执行完成、无未解决不可用状态，且自动检查及人工评审均通过时，汇总才能为 pass。中断、缺例、重复 ID 或没有执行清单的旧报告都不能汇总成全部通过。
 
 token 预算采用 UTF-8 字节数加消息开销的保守估算，配合输出预留与安全余量；会裁剪旧的完整轮次，保留系统和当前问题。估算不是供应商精确 tokenizer，部署时必须按真实模型上下文窗口调整配置。提取同时预留 schema 开销；超预算直接 422，不截断本轮输入。SDK 不自动重试，避免重复流式内容。
+
+## Git 工作方式
+
+本项目按单人开发方式维护：GitHub 默认分支为 `main`，本地也直接在 `main` 修改、验证并提交，再推送到 `origin/main`。日常更新不要求新建功能分支或创建 PR；只有明确需要隔离实验时才使用其他分支。
+
+```powershell
+git switch main
+git pull --ff-only origin main  # 开始修改前同步；工作区应先保持干净
+# 修改文件并完成验证后
+git status
+git add <本次修改的文件路径>
+git commit -m '说明本次更新内容'
+git push origin main
+```
+
+提交前检查暂存文件，保持 `.env`、`.venv/`、`artifacts/` 不入库。
 
 ## 过程文件
 

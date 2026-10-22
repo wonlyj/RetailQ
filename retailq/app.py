@@ -1,11 +1,13 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 
 import anyio
 from fastapi import Depends, FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from retailq.config import Settings
@@ -45,6 +47,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application = FastAPI(title="RetailQ", version="0.1.0", lifespan=lifespan)
     application.state.settings = settings
+    web_directory = Path(__file__).parent / "web"
+    application.mount("/assets", StaticFiles(directory=web_directory), name="chat-assets")
+
+    @application.get("/", response_class=FileResponse, include_in_schema=False)
+    async def chat_page():
+        return FileResponse(web_directory / "index.html", headers={"Cache-Control": "no-cache"})
 
     @application.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError):

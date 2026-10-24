@@ -17,6 +17,14 @@ class Settings(BaseSettings):
     token_safety_margin: int = Field(default=512, ge=0)
     structured_output_method: Literal["json_mode", "json_schema"] = "json_mode"
     model_timeout_seconds: float = Field(default=60, gt=0)
+    mysql_host: str = "127.0.0.1"
+    mysql_port: int = Field(default=3306, gt=0, le=65535)
+    mysql_database: str = "retailq"
+    mysql_user: str = "retailq"
+    mysql_password: SecretStr = Field(default=SecretStr(""), repr=False)
+    mysql_root_password: SecretStr = Field(default=SecretStr(""), repr=False)
+    tool_timeout_seconds: float = Field(default=5, gt=0)
+    tool_read_retries: int = Field(default=1, ge=0, le=1)
 
     @field_validator("openai_base_url", "openai_model")
     @classmethod
@@ -47,3 +55,14 @@ class Settings(BaseSettings):
     @property
     def is_ready(self) -> bool:
         return bool(self.openai_base_url and self.openai_model and self.openai_api_key.get_secret_value().strip())
+
+    @property
+    def is_database_configured(self) -> bool:
+        return bool(self.mysql_host and self.mysql_database and self.mysql_user and self.mysql_password.get_secret_value())
+
+    @property
+    def database_url(self):
+        from sqlalchemy import URL
+        return URL.create("mysql+pymysql", username=self.mysql_user,
+                          password=self.mysql_password.get_secret_value(), host=self.mysql_host,
+                          port=self.mysql_port, database=self.mysql_database, query={"charset": "utf8mb4"})

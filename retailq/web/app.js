@@ -9,7 +9,19 @@
   let toastTimer;
   let persistenceAvailable = true;
   const uid = () => crypto.randomUUID();
+  const identityKey = 'retailq.user.v1';
+  let userId;
+  try {
+    userId = localStorage.getItem(identityKey) || sessionStorage.getItem(identityKey) || `demo-${uid()}`;
+    localStorage.setItem(identityKey, userId);
+    sessionStorage.setItem(identityKey, userId);
+  } catch { userId = `demo-${uid()}`; }
   const current = () => sessions.find((session) => session.id === activeId);
+  function executionNote(message) {
+    return (message.toolTrace || []).some((t) => t.name === 'create_ticket')
+      ? '工单操作可能已经提交，请核查后再操作。'
+      : (message.toolTrace || []).length ? '已完成的查询记录会保留。' : '本轮回复未完成，可继续咨询。';
+  }
   const icon = (name) => {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
@@ -51,7 +63,8 @@
           typeof message.id === "string" && typeof message.turnId === "string" &&
           typeof message.text === "string" && ["user", "assistant"].includes(message.role)
         ).slice(-200).map((message) => message.status === "pending"
-          ? { ...message, status: "stopped", detail: "页面已重新打开，上次未完成的回复未带入后续对话。" }
+          ? { ...message, status: "stopped", detail: `上次回复未完成。${executionNote(message)}`,
+              toolTrace: (message.toolTrace || []).map((trace) => trace.status === 'running' ? {...trace, status: 'unknown'} : trace) }
           : message),
       }));
       activeId = stored?.activeId;
@@ -168,14 +181,25 @@
     body.className = "message-body";
     const tools = document.createElement("div");
     tools.className = "message-tools";
-    content.append(heading, body, tools);
+    const trace = document.createElement('div');
+    trace.className = 'tool-trace';
+    content.append(heading, trace, body, tools);
     article.append(avatar, content);
     $("messages").append(article);
-    updateMessage(message, { article, body, tools });
-    return { article, body, tools };
+    updateMessage(message, { article, body, tools, trace });
+    return { article, body, tools, trace };
   }
   function updateMessage(message, elements) {
-    const { article, body, tools } = elements;
+    const { article, body, tools, trace } = elements;
+    trace.replaceChildren();
+    for (const item of Array.isArray(message.toolTrace) ? message.toolTrace : []) {
+      const badge = document.createElement('span');
+      badge.className = `tool-badge ${['running','completed','failed'].includes(item.status) ? item.status : 'unknown'}`;
+      const labels = {running:'执行中', completed:'已完成', failed: item.code === 'outcome_unknown' ? '结果未确认' : '未成功', unknown:'状态待核查'};
+      badge.append(icon(item.status === 'completed' ? 'check' : 'spark'), document.createTextNode(`${item.name} · ${labels[item.status] || labels.unknown}`));
+      trace.append(badge);
+    }
+    trace.hidden = !trace.childElementCount;
     article.classList.toggle("streaming", message.status === "pending" && Boolean(message.text));
     if (message.text) richText(body, message.text);
     else if (message.status === "pending") {
@@ -184,7 +208,7 @@
       for (let i = 0; i < 3; i++) typing.append(document.createElement("span"));
       const label = document.createElement("div");
       label.className = "typing-label";
-      label.textContent = "正在整理回复";
+      label.textContent = (message.toolTrace || []).some((t) => t.status === 'running') ? '正在查询，请稍候' : "正在整理回复";
       typing.append(label);
       body.replaceChildren(typing);
     } else body.textContent = message.role === "assistant" ? "本次未收到完整回复。" : "";
@@ -256,7 +280,7 @@
     try {
       const response = await fetch("/health", { signal: timeout.signal });
       const health = await response.json();
-      if (response.ok && health.model_configured) serviceState(true, "服务已就绪");
+      if (response.ok && health.model_configured && health.database_configured) serviceState(true, "服务已就绪");
       else serviceState(false, "服务暂未就绪");
     } catch { serviceState(false, "暂时无法连接"); }
     finally { clearTimeout(timer); }
@@ -270,7 +294,7 @@
     const turnId = uid();
     const createdAt = new Date().toISOString();
     const user = { id: uid(), turnId, role: "user", text, status: "complete", createdAt };
-    const assistant = { id: uid(), turnId, role: "assistant", text: "", status: "pending", createdAt };
+    const assistant = { id: uid(), turnId, role: "assistant", text: "", status: "pending", createdAt, toolTrace: [] };
     if (!session.messages.length) session.title = Array.from(text).slice(0, 20).join("");
     session.messages.push(user, assistant);
     session.messages = session.messages.slice(-200);
@@ -283,17 +307,18 @@
     persist();
     render();
     const article = $("messages").lastElementChild;
-    const elements = { article, body: article.querySelector(".message-body"), tools: article.querySelector(".message-tools") };
+    const elements = { article, body: article.querySelector(".message-body"), tools: article.querySelector(".message-tools"), trace: article.querySelector('.tool-trace') };
     let reader;
     let terminal = null;
     let inputRejected = false;
     try {
       const response = await fetch("/api/chat/stream", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }), signal: requestController.signal,
+        body: JSON.stringify({ message: text, history: session.conversationId ? [] : history, user_id: userId,
+          ...(session.conversationId ? {conversation_id: session.conversationId} : {}) }), signal: requestController.signal,
       });
       if (!response.ok) {
-        inputRejected = response.status === 422;
+        inputRejected = [400,404,409,422].includes(response.status);
         let detail;
         try { detail = await response.json(); } catch { /* Use the public fallback below. */ }
         throw new Error(detail?.error?.message || (response.status === 422
@@ -321,8 +346,21 @@
             assistant.text += payload.text;
             updateMessage(assistant, elements);
             scrollToBottom();
+          } else if (event === 'meta') {
+            if (!Number.isSafeInteger(payload.conversation_id) || payload.conversation_id <= 0) throw new Error('会话标识异常，请新建对话。');
+            session.conversationId = payload.conversation_id;
+            persist();
+          } else if (event === 'tool_status') {
+            if (typeof payload.name !== 'string' || typeof payload.tool_call_id !== 'string' || !['running','completed','failed'].includes(payload.status)) throw new Error('工具状态格式异常。');
+            const prior = assistant.toolTrace.findIndex((t) => t.tool_call_id === payload.tool_call_id);
+            if (prior < 0) assistant.toolTrace.push(payload);
+            else assistant.toolTrace[prior] = payload;
+            updateMessage(assistant, elements);
+            persist();
+            scrollToBottom();
+            $('announcer').textContent = `${payload.name} ${payload.status === 'running' ? '执行中' : payload.status === 'completed' ? '已完成' : '结果需核查'}`;
           } else if (event === "done") terminal = payload.finish_reason;
-          else if (event !== "meta") throw new Error("回复格式异常，请重试。");
+          else throw new Error("回复格式异常，请重试。");
         }
         event = "";
         data = [];
@@ -339,7 +377,7 @@
       }
       if (terminal !== "stop" || !assistant.text) {
         assistant.status = terminal === "length" ? "truncated" : "error";
-        assistant.detail = terminal === "length" ? "回复达到长度限制，未带入后续对话。你可以缩短问题后再试。" : "回复未完整结束，未带入后续对话。";
+        assistant.detail = terminal === "length" ? "回复达到长度限制。已执行的工具记录会保留，可缩短问题后继续咨询。" : "回复未完整结束，请核查工具状态后继续。";
       } else {
         assistant.status = "complete";
         serviceState(true, "服务已就绪");
@@ -347,14 +385,15 @@
       }
     } catch (error) {
       assistant.status = requestController.signal.aborted ? "stopped" : "error";
-      assistant.detail = requestController.signal.aborted ? "已停止回复，未带入后续对话。" :
-        `${error instanceof TypeError ? "网络连接中断，请检查服务后重试。" : error.message || "回复异常，请重试。"} 本轮未带入后续对话。`;
+      assistant.detail = requestController.signal.aborted ? `已停止回复。${executionNote(assistant)}` :
+        `${error instanceof TypeError ? "网络连接中断，请检查服务。" : error.message || "回复异常。"} ${executionNote(assistant)}`;
       if (!requestController.signal.aborted && !inputRejected) serviceState(false, "本次回复异常");
     } finally {
       try { await reader?.cancel(); } catch { /* Already aborted or closed. */ }
       reader?.releaseLock();
       busy = false;
       controller = null;
+      assistant.toolTrace = assistant.toolTrace.map((t) => t.status === 'running' ? {...t, status:'unknown'} : t);
       updateMessage(assistant, elements);
       persist();
       syncControls();

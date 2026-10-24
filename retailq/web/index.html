@@ -47,7 +47,7 @@
           <p>从商品选择到售后咨询，提供清晰、实用的帮助。</p>
           <button id="scopeButton">了解服务范围<svg><use href="#i-right"/></svg></button>
         </div>
-        <div class="local-note"><span class="tiny-dot"></span>会话保留在当前标签页</div>
+        <div class="local-note"><span class="tiny-dot"></span>本机演示 · 会话及工具记录已保存</div>
       </div>
     </aside>
     <main class="main">
@@ -62,10 +62,10 @@
           <h2 id="welcomeTitle">你好，有什么可以帮你？</h2>
           <p class="welcome-description">从挑选商品到售后处理，陪你把每一步问清楚。</p>
           <div class="suggestions" id="suggestions">
-            <button class="suggestion" data-prompt="买跑步鞋时，怎么选择合适的尺码？"><span class="suggestion-icon mint"><svg><use href="#i-box"/></svg></span><span><strong>选购有疑问</strong><small>跑步鞋怎么选合适的尺码？</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
-            <button class="suggestion" data-prompt="我的包裹物流好几天没更新了，应该怎么办？"><span class="suggestion-icon blue"><svg><use href="#i-truck"/></svg></span><span><strong>物流想了解</strong><small>包裹好几天没有更新了</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
-            <button class="suggestion" data-prompt="收到的鞋子偏小，我想换货，需要准备什么信息？"><span class="suggestion-icon peach"><svg><use href="#i-swap"/></svg></span><span><strong>售后需要帮助</strong><small>收到的鞋子偏小，想换货</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
-            <button class="suggestion" data-prompt="申请退款一般需要提供什么信息？"><span class="suggestion-icon lavender"><svg><use href="#i-receipt"/></svg></span><span><strong>退款怎么处理</strong><small>申请退款需要哪些信息？</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
+            <button class="suggestion" data-prompt="退货政策是什么"><span class="suggestion-icon mint"><svg><use href="#i-box"/></svg></span><span><strong>退货政策</strong><small>查询演示退货规则</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
+            <button class="suggestion" data-prompt="订单 1001 的物流到哪了"><span class="suggestion-icon blue"><svg><use href="#i-truck"/></svg></span><span><strong>查询物流</strong><small>订单 1001 的物流到哪了</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
+            <button class="suggestion" data-prompt="邮费是多少"><span class="suggestion-icon peach"><svg><use href="#i-swap"/></svg></span><span><strong>配送费用</strong><small>邮费是多少？</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
+            <button class="suggestion" data-prompt="订单1001配送延迟，请帮我创建投诉工单交人工处理"><span class="suggestion-icon lavender"><svg><use href="#i-receipt"/></svg></span><span><strong>需要人工处理</strong><small>创建配送延迟投诉工单</small></span><svg class="suggestion-arrow"><use href="#i-right"/></svg></button>
           </div>
           <div class="welcome-tip"><svg><use href="#i-chat"/></svg>也可以直接说说你的问题，我们从这里开始。</div>
         </section>
@@ -74,17 +74,17 @@
       <div class="composer-area">
         <form class="composer" id="chatForm">
           <label class="sr-only" for="messageInput">输入购物相关问题</label>
-          <textarea id="messageInput" rows="1" maxlength="8000" placeholder="说说你的问题，例如：收到的鞋子偏小，想换货…"></textarea>
+          <textarea id="messageInput" rows="1" maxlength="8000" placeholder="说说你的问题，例如：邮费是多少？…"></textarea>
           <div class="composer-toolbar"><span class="keyboard-hint">Enter 发送 <span>·</span> Shift + Enter 换行</span><div class="composer-actions"><span class="char-count" id="charCount">0 / 8000</span><button class="send-button" id="sendButton" type="submit" disabled><span id="sendLabel">发送</span><svg id="sendIcon"><use href="#i-arrow"/></svg></button></div></div>
         </form>
-        <p class="composer-note">具体处理以平台售后规则与人工核实结果为准。</p>
+        <p class="composer-note">订单、商品、物流为演示数据；实际处理以平台规则为准。</p>
       </div>
     </main>
   </div>
   <dialog class="help-dialog" id="helpDialog" aria-labelledby="helpTitle">
     <div class="dialog-heading"><span class="dialog-icon"><svg><use href="#i-shield"/></svg></span><button class="icon-button" id="closeHelp" aria-label="关闭服务说明"><svg><use href="#i-close"/></svg></button></div>
     <h2 id="helpTitle">很高兴为你提供帮助</h2><p>你可以咨询商品选择、订单、物流，以及退款、换货、维修和投诉相关问题。</p>
-    <div class="help-points"><p><strong>关于具体订单</strong><span>当前无法查询实时订单、物流、价格或库存，具体信息需要人工核实。</span></p><p><strong>关于售后处理</strong><span>这里提供咨询与处理指引，不能代为退款、修改订单或完成转接。</span></p><p><strong>关于个人信息</strong><span>请勿发送密码或验证码。需要核实订单时，先提供订单号即可。</span></p></div>
+    <div class="help-points"><p><strong>关于具体订单</strong><span>支持查询订单、物流和商品；当前返回随机演示数据，不代表真实业务情况。</span></p><p><strong>关于售后处理</strong><span>支持查询演示FAQ、创建待处理人工工单；不能代为退款、修改订单或即时接通人工。</span></p><p><strong>关于个人信息</strong><span>请勿发送密码或验证码。需要核实订单时，先提供订单号即可。</span></p></div>
     <button class="dialog-done" id="helpDone">知道了，开始咨询</button>
   </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

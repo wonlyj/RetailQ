@@ -19,7 +19,7 @@ def test_missing_model_config_health():
     from retailq.config import Settings
     from retailq.app import create_app
     with TestClient(create_app(Settings(_env_file=None))) as client:
-        assert client.get("/health").json() == {"status": "ok", "model_configured": False}
+        assert client.get("/health").json() == {"status": "ok", "model_configured": False, "database_configured": False}
 
 
 @pytest.mark.parametrize("kwargs", [

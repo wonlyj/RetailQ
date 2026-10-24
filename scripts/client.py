@@ -11,13 +11,16 @@ class ApiFailure(Exception):
 
 
 def check_response(response: httpx.Response) -> None:
-    if response.status_code == 503:
-        raise ApiFailure("model_not_configured")
     if response.status_code != 200:
-        raise ApiFailure(f"api_http_{response.status_code}")
+        try:
+            code = response.json().get('error',{}).get('code')
+        except (ValueError,AttributeError,TypeError):
+            code = None
+        raise ApiFailure(code if isinstance(code,str) else f"api_http_{response.status_code}")
 
 
-async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: list) -> dict:
+async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: list, *,
+               conversation_id: int | None = None, user_id: str = 'local-demo') -> dict:
     import json
 
     start = time.perf_counter()
@@ -25,8 +28,14 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
     first = None
     terminal = None
     metadata = {}
+    tool_status = []
+    body = {'message':message,'history':history,'user_id':user_id}
+    if conversation_id is not None:
+        body['conversation_id'] = conversation_id
     async with client.stream("POST", base_url.rstrip("/") + "/api/chat/stream",
-                             json={"message": message, "history": history}) as response:
+                             json=body) as response:
+        if response.status_code != 200:
+            await response.aread()
         check_response(response)
         event = None
         data = []
@@ -42,7 +51,7 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                     except (ValueError, TypeError):
                         raise ApiFailure("invalid_sse_json") from None
                     if event == "error":
-                        raise ApiFailure("stream_error")
+                        raise ApiFailure(payload.get('code','stream_error'))
                     if terminal is not None:
                         raise ApiFailure("events_after_done")
                     if event == "token":
@@ -54,6 +63,11 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                         text.append(value)
                     elif event == "meta":
                         metadata = payload
+                    elif event == 'tool_status':
+                        if (not isinstance(payload.get('name'),str) or not isinstance(payload.get('tool_call_id'),str)
+                                or payload.get('status') not in ('running','completed','failed')):
+                            raise ApiFailure('invalid_tool_status')
+                        tool_status.append(payload)
                     elif event == "done":
                         terminal = payload.get("finish_reason")
                     else:
@@ -62,7 +76,8 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
     if not text or terminal != "stop":
         raise ApiFailure("incomplete_or_truncated_stream")
     return {"text": "".join(text), "token_events": len(text), "first_token_seconds": first,
-            "total_seconds": time.perf_counter() - start, "finish_reason": terminal, "meta": metadata}
+            "total_seconds": time.perf_counter() - start, "finish_reason": terminal, "meta": metadata,
+            'conversation_id':metadata.get('conversation_id'),'tool_status':tool_status}
 
 
 async def extract(client: httpx.AsyncClient, base_url: str, description: str) -> dict:

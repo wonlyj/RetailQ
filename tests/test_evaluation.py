@@ -3,7 +3,7 @@ import pytest
 from retailq.app import create_app
 from tests.support.servers import run_server
 from tests.support.upstream import ControlledUpstream
-from tests.test_gateway import settings_for
+from tests.support.database import chat_settings as settings_for
 
 
 def test_eval_scoring_and_incomplete():
@@ -27,25 +27,27 @@ def test_eval_scoring_and_incomplete():
 
 
 @pytest.mark.anyio
-async def test_smoke_carries_actual_history():
+@pytest.mark.mysql
+async def test_smoke_carries_actual_history(test_database):
     from scripts.smoke import run_smoke
     upstream = ControlledUpstream(chunks=["订单", "00123"])
     with run_server(upstream.app) as url, run_server(create_app(settings_for(url))) as api:
         report = await run_smoke(api)
         assert report["status"] == "pass"
         assert report["round1"]["token_events"] == 2
-        assert upstream.requests[1][0]["messages"][-2] == {"role": "assistant", "content": "订单00123"}
-        assert len(upstream.requests) == 3
+        assert upstream.requests[3][0]["messages"][-2] == {"role": "assistant", "content": "订单00123"}
+        assert len(upstream.requests) == 5
 
 
 @pytest.mark.anyio
-async def test_smoke_rejects_truncation_and_error():
+@pytest.mark.mysql
+async def test_smoke_rejects_truncation_and_error(test_database):
     from scripts.smoke import run_smoke
     upstream = ControlledUpstream(chunks=["00123"], finish_reason="length")
     with run_server(upstream.app) as url, run_server(create_app(settings_for(url))) as api:
         report = await run_smoke(api)
         assert report["status"] == "fail"
-        assert upstream.request_count == 1
+        assert upstream.request_count == 2
 
 
 def test_empty_or_unreviewed_report_cannot_pass():

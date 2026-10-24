@@ -9,7 +9,14 @@ from retailq.app import create_app
 from retailq.config import Settings
 from tests.support.servers import run_server
 from tests.support.upstream import ControlledUpstream
-from tests.test_gateway import settings_for
+from tests.support.database import chat_settings as settings_for
+
+pytestmark = pytest.mark.mysql
+
+
+@pytest.fixture(autouse=True)
+def isolated_chat_database(test_database):
+    yield
 
 
 def parse_sse(text):
@@ -39,9 +46,9 @@ def test_chat_sse_contract_and_client_history():
         assert events[-1][1] == {"finish_reason": "stop"}
         history = [{"role": "user", "content": "订单00123"}, {"role": "assistant", "content": "您好"}]
         client.post("/api/chat/stream", json={"message": "刚才订单号？", "history": history})
-        assert [m["content"] for m in upstream.requests[1][0]["messages"]][1:] == ["订单00123", "您好", "刚才订单号？"]
+        assert [m["content"] for m in upstream.requests[2][0]["messages"]][1:] == ["订单00123", "您好", "刚才订单号？"]
         client.post("/api/chat/stream", json={"message": "新会话"})
-        assert len(upstream.requests[2][0]["messages"]) == 2
+        assert len(upstream.requests[4][0]["messages"]) == 2
 
 
 def test_pre_stream_errors_do_not_call_model():
@@ -72,7 +79,7 @@ def test_stream_error_and_finish_reason(kwargs, last_event):
             assert "sensitive-upstream-secret" not in json.dumps(events)
         else:
             assert events[-1][1]["finish_reason"] == "length"
-        assert upstream.request_count == 1
+        assert upstream.request_count == (1 if kwargs.get('status') == 500 else 2)
 
 
 @pytest.mark.anyio

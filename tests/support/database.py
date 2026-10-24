@@ -5,6 +5,13 @@ import pytest
 from retailq.config import Settings
 
 
+def chat_settings(url, **kwargs):
+    from tests.test_gateway import settings_for
+    local = Settings()
+    return settings_for(url, mysql_host='127.0.0.1',mysql_port=3307,mysql_database='retailq_test',
+                        mysql_user=local.mysql_user,mysql_password=local.mysql_password,**kwargs)
+
+
 @pytest.fixture
 def test_database():
     from retailq.db import Database

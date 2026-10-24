@@ -18,9 +18,13 @@ class HistoryMessage(StrictModel):
 class ChatRequest(StrictModel):
     message: Text
     history: list[HistoryMessage] = Field(default_factory=list, max_length=100)
+    conversation_id: int | None = Field(default=None, strict=True, gt=0, le=18446744073709551615)
+    user_id: Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=64)] = 'local-demo'
 
     @model_validator(mode="after")
     def complete_turns(self):
+        if self.conversation_id is not None and self.history:
+            raise ValueError('server conversation ID and imported history cannot be combined')
         if len(self.history) % 2 or any(
             message.role != ("user" if i % 2 == 0 else "assistant")
             for i, message in enumerate(self.history)

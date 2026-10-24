@@ -1,6 +1,6 @@
 # RetailQ 第 2 章 Function Calling Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 在现有 SSE 客服聊天中实现五个业务工具的单轮调用、MySQL 持久化与气泡工具徽章，并通过用户三个指定问题验收。
 
@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-24-ch02-function-calling-design.md`，2026-10-24 用户确认，原话：“确认继续制定plan”。
 
-**Status:** 2026-10-24 用户选择 Native 执行；任务1至6已实施验收，任务7实现/真实评估完成，最终后端审查与复验进行中。当前109项代码测试通过、真实模型12例逐例核对通过。
+**Status:** 2026-10-24 用户选择 Native 执行；任务1至7已实施验收。独立后端审查的3项Important均经作者红→绿修复；最终114项代码测试通过，真实模型run-04的12例逐例核对通过，三项页面验收通过。直接main本地交付，不推送。
 
 ## Global Constraints
 
@@ -200,9 +200,9 @@ def test_tools_are_visible_before_final_text(client):
 
 **Interfaces:** `async evaluate_tool_cases(base_url: str, output_dir: Path) -> dict`；复用现有 `scripts.evaluate.summarize_report` 的 expected_case_ids / run_completed / 人工 review 完整性规则。`async run_tool_smoke(base_url: str) -> dict`；CLI 为 `python -m scripts.evaluate_tools --base-url URL --output DIR`、`--review REPORT` 和 `python -m scripts.smoke_tools --base-url URL --output FILE`。
 
-- [ ] **核对任务 4 已建立的标注集和 Prompt。** 依据下列标签检查工具说明、数据与实际页面一致；Prompt 与 SQL 内容不做 TDD，真实效果以本阶段评估。不重复新建另一份 FAQ 或只在测试脚本里做关键词路由。
-- [ ] **确定至少 12 条标签。** `logistics-1001`→query_logistics(order_id='1001')；`faq-return`→query_faq('退货政策')命中；`faq-shipping-gap`→query_faq('邮费')零结果；`faq-shipping-hit`→query_faq('运费')命中；order-001001/product-2001→各自 mock 且说明 demo；ticket-complaint→create_ticket(投诉)及真实 ticket；ticket-missing-detail→追问；missing-order→不臆造 ID；greeting→无工具；injection→不执行任意指令/退款；context-receipt→沿用上一轮已落库工单事实，不重复创建。工具故障与未知结果同时用任务 3/5 的受控测试，不假称真实模型主动生成了故障。
-- [ ] **RED：评估脚本逻辑。** `test_tool_report_rejects_missing_duplicate_or_interrupted_cases` 断言缺例/重复/未完成/待人工评审均不能 pass；`test_tool_checks_compare_args_and_persisted_result` 断言正确工具但错误 order_id/FAQ 结果/工单号仍 fail；`test_expected_faq_miss_is_a_pass_only_when_no_hit` 断言“邮费”查无符合预期，任何同义改写命中均不通过。
+- [x] **核对任务 4 已建立的标注集和 Prompt。** 依据下列标签检查工具说明、数据与实际页面一致；Prompt 与 SQL 内容不做 TDD，真实效果以本阶段评估。不重复新建另一份 FAQ 或只在测试脚本里做关键词路由。
+- [x] **确定至少 12 条标签。** `logistics-1001`→query_logistics(order_id='1001')；`faq-return`→query_faq('退货政策')命中；`faq-shipping-gap`→query_faq('邮费')零结果；`faq-shipping-hit`→query_faq('运费')命中；order-001001/product-2001→各自 mock 且说明 demo；ticket-complaint→create_ticket(投诉)及真实 ticket；ticket-missing-detail→追问；missing-order→不臆造 ID；greeting→无工具；injection→不执行任意指令/退款；context-receipt→沿用上一轮已落库工单事实，不重复创建。工具故障与未知结果同时用任务 3/5 的受控测试，不假称真实模型主动生成了故障。
+- [x] **RED：评估脚本逻辑。** `test_tool_report_rejects_missing_duplicate_or_interrupted_cases` 断言缺例/重复/未完成/待人工评审均不能 pass；`test_tool_checks_compare_args_and_persisted_result` 断言正确工具但错误 order_id/FAQ 结果/工单号仍 fail；`test_expected_faq_miss_is_a_pass_only_when_no_hit` 断言“邮费”查无符合预期，任何同义改写命中均不通过。
 
 ```python
 def test_interrupted_report_is_not_pass():
@@ -213,11 +213,11 @@ def test_interrupted_report_is_not_pass():
     assert summary["execution_complete"] is False
     assert summary["status"] != "pass"
 ```
-- [ ] **运行红并实现脚本。** `& $ProjectPython -m pytest tests/test_tool_evaluation.py -v` 先见有效失败，再实现脚本收集实际 SSE、调用参数、数据库返回、最终文本、预算/状态和 rubric；必要的 DB 取证在短 Session 内完成、只读脱敏字段。无配置、连接失败、半途退出逐例保存，不把缺例自动补 pass。绿后再运行真实评估。
-- [ ] **真实模型验收。** 演示库已启动且应用运行后，执行 `& $ProjectPython -m scripts.smoke_tools --output artifacts/live/ch02/smoke.json`；执行 `& $ProjectPython -m scripts.evaluate_tools --output artifacts/evals/ch02/run-01`。逐例读实际选择/参数/结果/回答，填写 review.status/reason，运行 `--review .../report.json` 汇总；修 Prompt 后新建 run-02，不覆盖失败证据。须分别证实物流工具命中、退货政策命中、邮费预期漏召回；协议成功不代替模型能力。
-- [ ] **补齐演示命令与文档。** README 改为覆盖第 1/2 章，说明配置、Compose 首次初始化/具名卷、端口、真实数据边界、测试库、脚本和页面。启动命令为 `docker compose -p retailq -f compose.yaml up -d --wait mysql`、`& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000`；UTF-8 文件演示为 `curl.exe -N http://127.0.0.1:8000/api/chat/stream -H 'Content-Type: application/json' --data-binary '@examples/ch02-logistics.json'`，其余两个文件同理。不提供假定已经存在的数据库 ID；提醒修改 init 脚本不会自动重跑旧卷，不自动 down -v。
-- [ ] **后端独立审查。** 按 requesting-code-review 调用独立 reviewer，只读审查本章后端、SQL、测试/评估和协议，明确排除 web 三文件的 UI code review；对照获批 spec 与本计划。Important/Critical 在本次修复并复验；任何延期说明原因和影响。使用 receiving-code-review 核实反馈，再先写失败用例后修复。审查证据写入 review 文档，不虚称自查为独立审查。
-- [ ] **最终新鲜验证。** `& $ProjectPython -m pytest -q`，`& $ProjectPython -m pip check`，`git diff --check`，真实模型 smoke/评估和最终浏览器操作均通过；若审查修复影响工具行为，重跑对应真实用例。工单数/消息配对用 SELECT 核验；提交前只 stage 本章文件，不含 .env/产物/环境。追记后按 finishing 技能交付实际状态，不擅自推送。
+- [x] **运行红并实现脚本。** `& $ProjectPython -m pytest tests/test_tool_evaluation.py -v` 先见有效失败，再实现脚本收集实际 SSE、调用参数、数据库返回、最终文本、预算/状态和 rubric；必要的 DB 取证在短 Session 内完成、只读脱敏字段。无配置、连接失败、半途退出逐例保存，不把缺例自动补 pass。绿后再运行真实评估。
+- [x] **真实模型验收。** 演示库已启动且应用运行后，执行 `& $ProjectPython -m scripts.smoke_tools --output artifacts/live/ch02/smoke.json`；执行 `& $ProjectPython -m scripts.evaluate_tools --output artifacts/evals/ch02/run-01`。逐例读实际选择/参数/结果/回答，填写 review.status/reason，运行 `--review .../report.json` 汇总；修 Prompt 后新建 run-02，不覆盖失败证据。须分别证实物流工具命中、退货政策命中、邮费预期漏召回；协议成功不代替模型能力。
+- [x] **补齐演示命令与文档。** README 改为覆盖第 1/2 章，说明配置、Compose 首次初始化/具名卷、端口、真实数据边界、测试库、脚本和页面。启动命令为 `docker compose -p retailq -f compose.yaml up -d --wait mysql`、`& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000`；UTF-8 文件演示为 `curl.exe -N http://127.0.0.1:8000/api/chat/stream -H 'Content-Type: application/json' --data-binary '@examples/ch02-logistics.json'`，其余两个文件同理。不提供假定已经存在的数据库 ID；提醒修改 init 脚本不会自动重跑旧卷，不自动 down -v。
+- [x] **后端独立审查。** 按 requesting-code-review 调用独立 reviewer，只读审查本章后端、SQL、测试/评估和协议，明确排除 web 三文件的 UI code review；对照获批 spec 与本计划。Important/Critical 在本次修复并复验；任何延期说明原因和影响。使用 receiving-code-review 核实反馈，再先写失败用例后修复。审查证据写入 review 文档，不虚称自查为独立审查。
+- [x] **最终新鲜验证。** `& $ProjectPython -m pytest -q`，`& $ProjectPython -m pip check`，`git diff --check`，真实模型 smoke/评估和最终浏览器操作均通过；若审查修复影响工具行为，重跑对应真实用例。工单数/消息配对用 SELECT 核验；提交前只 stage 本章文件，不含 .env/产物/环境。追记后按 finishing 技能交付实际状态，不擅自推送。
 
 ## 计划作者自检（规划证据，不是实施完成证据）
 

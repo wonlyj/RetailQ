@@ -62,6 +62,37 @@ def test_sse_logistics_persisted_roundtrip(test_database):
         assert client.post('/api/chat/stream',json={'message':'偷看','conversation_id':cid,'user_id':'bob'}).status_code == 404
 
 
+def test_case_distinct_call_ids_keep_separate_receipts_and_create_ticket(test_database):
+    upstream = ControlledToolUpstream([wire_call('query_order',{'order_id':'1001'},'call_1')])
+    repo = ChatRepository(test_database)
+    with run_server(upstream.app) as url, TestClient(create_app(chat_settings(url))) as client:
+        first = parse_sse(client.post('/api/chat/stream',json={'message':'查订单1001','user_id':'alice'}).text)
+        cid = first[0][1]['conversation_id']
+        upstream.calls = [wire_call('create_ticket',{'description':'订单1001延迟','ticket_type':'投诉'},'CALL_1')]
+        second = parse_sse(client.post('/api/chat/stream',json={'message':'请创建投诉工单','user_id':'alice','conversation_id':cid}).text)
+        assert second[-1] == ('done',{'finish_reason':'stop'})
+        receipts = {r.tool_call_id:json.loads(r.content) for r in repo.load_messages(cid,'alice') if r.role=='tool'}
+        assert set(receipts) == {'call_1','CALL_1'}
+        assert receipts['call_1']['data']['order_id'] == '1001'
+        number = receipts['CALL_1']['data']['ticket_no']
+        with test_database.sessions() as session:
+            assert session.get(Ticket,number).conversation_id == cid
+        # append_message's duplicate check must use the same exact comparison.
+        repo.append_message(cid,'alice','tool','{"ok":false}',None,'CaLl_1')
+        assert len([r for r in repo.load_messages(cid,'alice') if r.role=='tool'])==3
+
+
+@pytest.mark.parametrize('reason',['content_filter','unexpected_reason'])
+def test_abnormal_finish_is_error_and_never_persisted_as_answer(test_database,reason):
+    upstream=ControlledToolUpstream(final_reason=reason)
+    with run_server(upstream.app) as url,TestClient(create_app(chat_settings(url))) as client:
+        events=parse_sse(client.post('/api/chat/stream',json={'message':'订单1001物流','user_id':'alice'}).text)
+        assert events[-1][0]=='error'
+        assert not any(name=='done' for name,_ in events)
+        cid=events[0][1]['conversation_id']
+        assert [r.role for r in ChatRepository(test_database).load_messages(cid,'alice')]==['user','assistant','tool']
+
+
 @pytest.mark.parametrize('case',['multiple','invalid','unknown','no_tool','length','eof','second_tool','final_commit'])
 def test_tool_failures_and_no_tool_contract(test_database, monkeypatch, case):
     kwargs = {}

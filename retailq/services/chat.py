@@ -110,6 +110,8 @@ class ChatService:
                 raise unsupported()
             if finish_reason is None:
                 raise ServiceError('incomplete_upstream_stream',502,'模型回复未完整结束，请重试。')
+            if finish_reason not in ('stop','length'):
+                raise ServiceError('unsupported_finish_reason',502,'模型回复异常结束，请重试或核查模型服务。')
             if finish_reason == 'stop':
                 await self._write(self.repository.append_message,turn.conversation_id,turn.user_id,'assistant',''.join(text))
             yield ChatEvent('done',{'finish_reason':finish_reason})

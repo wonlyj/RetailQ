@@ -42,6 +42,18 @@ def test_wrong_owner_and_missing_conversation(repository):
         repository.start_turn('alice', cid, [HistoryMessage(role='user', content='重复')], '新')
 
 
+@pytest.mark.parametrize('impostor',['ALICE','álice'])
+def test_user_ownership_uses_exact_identifiers(repository,impostor):
+    cid = repository.start_turn('alice',None,[],'仅alice可见')
+    for operation in [lambda:repository.load_messages(cid,impostor),
+                      lambda:repository.start_turn(impostor,cid,[],'错误身份'),
+                      lambda:repository.append_message(cid,impostor,'assistant','错误身份')]:
+        with pytest.raises(ServiceError) as error:
+            operation()
+        assert error.value.status_code == 404
+    assert len(repository.load_messages(cid,'alice')) == 1
+
+
 def test_faq_literal_like_and_gap(repository):
     assert repository.search_faq('退货政策')
     assert repository.search_faq('运费')

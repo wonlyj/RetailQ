@@ -41,7 +41,10 @@ class ChatRepository:
 
     @staticmethod
     def _owned(session, cid: int, user_id: str, *, lock: bool = False):
-        statement = select(Conversation).where(Conversation.id == cid, Conversation.user_id == user_id)
+        # Opaque identities must match Python/tool-call semantics even though
+        # the supplied schema intentionally keeps its default ai_ci collation.
+        statement = select(Conversation).where(Conversation.id == cid,
+            Conversation.user_id.collate('utf8mb4_0900_bin') == user_id)
         conversation = session.scalar(statement.with_for_update() if lock else statement)
         if conversation is None:
             raise ServiceError('conversation_not_found', 404, '未找到当前用户的会话，请新建会话。')
@@ -79,7 +82,7 @@ class ChatRepository:
             self._owned(session, conversation_id, user_id, lock=True)
             if role == 'tool':
                 existing = session.scalar(select(Message).where(Message.conversation_id == conversation_id,
-                    Message.role == 'tool', Message.tool_call_id == tool_call_id))
+                    Message.role == 'tool', Message.tool_call_id.collate('utf8mb4_0900_bin') == tool_call_id))
                 if existing is not None:
                     return existing.id
             row = Message(conversation_id=conversation_id, role=role, content=content,
@@ -103,7 +106,7 @@ class ChatRepository:
         with self.database.sessions.begin() as session:
             conversation = self._owned(session, conversation_id, user_id, lock=True)
             existing = session.scalar(select(Message).where(Message.conversation_id == conversation_id,
-                Message.role == 'tool', Message.tool_call_id == tool_call_id))
+                Message.role == 'tool', Message.tool_call_id.collate('utf8mb4_0900_bin') == tool_call_id))
             if existing is not None:
                 payload = json.loads(existing.content)
                 if payload.get('ok'):

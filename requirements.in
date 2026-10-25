@@ -7,3 +7,5 @@ SQLAlchemy>=2,<3
 PyMySQL[rsa]>=1,<2
 tokenizers==0.22.1
 httpx==0.28.1
+pymilvus==3.0.2
+milvus-lite==3.2.2

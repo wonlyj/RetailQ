@@ -77,3 +77,17 @@ class SourceDocument:
 class EmbeddingProvider(Protocol):
     def embed(self,texts: list[str],*,deadline: float | None=None) -> list[list[float]]: ...
     def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class VectorItem:
+    id: int
+    vector: list[float]
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class SearchHit:
+    id: int
+    score: float
+    fingerprint: str

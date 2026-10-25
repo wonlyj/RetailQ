@@ -11,7 +11,7 @@ from pydantic import BaseModel,ConfigDict,Field
 from retailq.config import Settings
 from retailq.context import estimate_tokens,require_budget
 from retailq.errors import ServiceError
-from retailq.knowledge.contracts import ConversationSnapshot,QAProposal
+from retailq.knowledge.contracts import ConversationSnapshot,QAProposal,DedupGroup
 
 
 class ExtractedItem(BaseModel):
@@ -25,6 +25,19 @@ class ExtractedItem(BaseModel):
 class ExtractionResult(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     items: list[ExtractedItem] = Field(max_length=100)
+
+
+class DedupGroupModel(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    member_ids: list[int] = Field(min_length=1)
+    representative_id: int | None
+    target_chunk_id: int | None
+    questions: list[str] = Field(min_length=1)
+
+
+class DedupResult(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True)
+    groups: list[DedupGroupModel]
 
 
 def prompt(name):
@@ -77,3 +90,8 @@ class OpenAIQAGateway:
         if not batch:return []
         output=self._invoke(ExtractionResult,prompt('qa_extract.txt'),[asdict(row) for row in batch])
         return [QAProposal(**row.model_dump()) for row in output.items]
+
+    def deduplicate(self,candidates):
+        if not candidates:return []
+        output=self._invoke(DedupResult,prompt('qa_dedup.txt'),[asdict(c) for c in candidates])
+        return [DedupGroup(tuple(g.member_ids),g.representative_id,g.target_chunk_id,tuple(g.questions)) for g in output.groups]

@@ -5,7 +5,7 @@ from sqlalchemy import select, update
 
 from retailq.db import Database
 from retailq.errors import ServiceError
-from retailq.knowledge.contracts import ChunkDraft, ChunkRecord, QAProposal, StagedQA, MiningMessage, ConversationSnapshot
+from retailq.knowledge.contracts import ChunkDraft, ChunkRecord, QAProposal, StagedQA, MiningMessage, ConversationSnapshot, DedupGroup
 from retailq.knowledge.models import KnowledgeChunk, QAStaging
 from retailq.knowledge.text import content_fingerprint
 from retailq.repositories import database_errors
@@ -128,3 +128,30 @@ class KnowledgeRepository:
         with self.database.sessions() as session:
             rows=session.scalars(select(QAStaging).where(QAStaging.batch_no.collate('utf8mb4_0900_bin').in_(batch_nos)).order_by(QAStaging.id))
             return [self._staged(row) for row in rows]
+
+    @database_errors
+    def apply_dedup(self,groups: list[DedupGroup]) -> list[int]:
+        result=[]
+        for group in groups:
+            with self.database.sessions.begin() as session:
+                rows=session.scalars(select(QAStaging).where(QAStaging.id.in_(group.member_ids)).order_by(QAStaging.id).with_for_update()).all()
+                if {r.id for r in rows}!=set(group.member_ids) or set(group.questions)!={r.question for r in rows}:raise ValueError('invalid dedup group membership')
+                if group.target_chunk_id is not None:
+                    target=session.get(KnowledgeChunk,group.target_chunk_id)
+                    if target is None:raise ValueError('missing existing knowledge target')
+                    for row in rows:row.status='discarded'
+                else:
+                    representative=next((r for r in rows if r.id==group.representative_id),None)
+                    if representative is None:raise ValueError('missing group representative')
+                    draft=ChunkDraft('对话知识','\n'.join(group.questions),representative.answer,None,'faq',False)
+                    existing=session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.category=='对话知识')).all()
+                    target=next((r for r in existing if record(r).draft==draft),None)
+                    unresolved=[r for r in rows if r.status=='extracted']
+                    if target is None:
+                        if len(unresolved)!=len(rows):raise ValueError('resolved staging has no matching knowledge')
+                        target=KnowledgeChunk(**asdict(draft),vectorize_status='pending')
+                        session.add(target);session.flush()
+                        if not 1<=target.id<=2**63-1:raise ValueError('knowledge id exceeds INT64')
+                    for row in unresolved:row.status='kept' if row.id==representative.id else 'discarded'
+                result.append(target.id)
+        return result

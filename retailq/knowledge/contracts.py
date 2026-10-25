@@ -134,3 +134,13 @@ class QAGateway(Protocol):
     def extract(self,batch: list[ConversationSnapshot]) -> list[QAProposal]: ...
     def deduplicate(self,candidates: list[DedupCandidate]) -> list[DedupGroup]: ...
     def close(self) -> None: ...
+
+
+@dataclass(frozen=True)
+class MiningReport:
+    run_id: str
+    extracted: int
+    kept: int
+    discarded: int
+    vectorized: int
+    complete: bool

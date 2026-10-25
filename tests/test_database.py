@@ -24,7 +24,7 @@ def test_database_empty_config_and_invalid_bounds():
 
 def test_mysql_mapping_names():
     from retailq.models import Base
-    assert set(Base.metadata.tables) == {'faq', 'conversations', 'messages', 'tickets'}
+    assert set(Base.metadata.tables) == {'faq', 'conversations', 'messages', 'tickets', 'knowledge_chunks', 'qa_extraction_staging'}
 
 
 @pytest.mark.mysql

@@ -1,4 +1,5 @@
 import pytest
+import retailq.knowledge.models  # Load all six mappings even in isolated tests.
 
 from tests.support.database import test_database
 

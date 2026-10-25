@@ -9,6 +9,7 @@ from retailq.knowledge.contracts import ChunkDraft, ChunkRecord
 from retailq.knowledge.models import KnowledgeChunk
 from retailq.knowledge.text import content_fingerprint
 from retailq.repositories import database_errors
+from retailq.models import FAQ
 
 
 def record(row: KnowledgeChunk) -> ChunkRecord:
@@ -84,3 +85,8 @@ class KnowledgeRepository:
         with self.database.sessions.begin() as session:
             result=session.execute(update(KnowledgeChunk).where(KnowledgeChunk.id.in_(ids)).values(vectorize_status='pending',vector_id=None))
             return result.rowcount
+
+    @database_errors
+    def faq_drafts(self) -> list[ChunkDraft]:
+        with self.database.sessions() as session:
+            return [ChunkDraft(r.category,r.question,r.answer,f'legacy-faq/{r.id}','faq') for r in session.scalars(select(FAQ).order_by(FAQ.id))]

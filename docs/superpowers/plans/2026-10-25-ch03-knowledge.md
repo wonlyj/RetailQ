@@ -144,7 +144,7 @@ def test_exact_embedding_template():
 
 **Interfaces:** `VectorizeReport(pending_before:int,done:int,failed:int,pending_after:int)`；`KnowledgeService(repository:KnowledgeRepository,embedding:EmbeddingProvider,vectors:MilvusKnowledgeStore,budget:BGETokenBudget,*,top_k:int=3,min_score:float=0.0,batch_size:int=16,query_timeout_seconds:float=5.0)`：`import_documents(documents:list[SourceDocument])->list[int]`、`import_faq()->list[int]`、`vectorize_pending(*,stop:threading.Event|None=None,fault:Callable[[str],None]|None=None)->VectorizeReport`、`reconcile()->list[int]`、`search_faq(keyword:str)->list[dict]`、`status()->dict[str,int]`。repository 增加 `faq_drafts()->list[ChunkDraft]`（原问法，content_type=faq，无指针链；作为单块来源依次导入）。tests/support/knowledge.py提供service:KnowledgeService fixture，使用隔离MySQL、临时Lite及将“配送查询”映射到运费种子的确定性嵌入，不作为语义效果证据。
 
-- [ ] **RED：双写每个中断边界。** `test_pending_is_committed_before_embedding`、`test_crash_after_upsert_reuses_ids`、`test_failed_rows_remain_pending_while_next_rows_progress`、`test_done_missing_vector_reconcile`、`test_search_preserves_score_order_and_uses_mysql_answer`、`test_orphan_pending_stale_vectors_are_never_returned`。真实 MySQL+Lite 配假嵌入确定性向量；断言重跑 chunk 数/ID 不变、每 ID 当前向量一条、pending 清零。故障只改 MySQL 答案而不改向量时，搜索指纹不匹配即跳过，不能返回旧向量支撑的新答案。
+- [x] **RED：双写每个中断边界。** `test_pending_is_committed_before_embedding`、`test_crash_after_upsert_reuses_ids`、`test_failed_rows_remain_pending_while_next_rows_progress`、`test_done_missing_vector_reconcile`、`test_search_preserves_score_order_and_uses_mysql_answer`、`test_orphan_pending_stale_vectors_are_never_returned`。真实 MySQL+Lite 配假嵌入确定性向量；断言重跑 chunk 数/ID 不变、每 ID 当前向量一条、pending 清零。故障只改 MySQL 答案而不改向量时，搜索指纹不匹配即跳过，不能返回旧向量支撑的新答案。
 
 ```python
 def test_faq_contract_has_no_internal_fields(service):
@@ -154,10 +154,10 @@ def test_faq_contract_has_no_internal_fields(service):
     assert len(items[0]['answer']) <= 1200
 ```
 
-- [ ] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_service.py -v`，测试始终限定 retailq_test:3307 和临时 Lite 目录。
-- [ ] **GREEN：实现批处理与恢复。** 每批读取有序 pending 快照→关闭 Session→嵌入→upsert 并核对返回 ID 集→带原内容指纹条件回填 done。失败不在同一次运行原地无限重试，使用 after_id 单调前进并汇总非零失败。仅在批次边界响应 stop；upsert后故障不改 done，重跑同 ID。reconcile 用全部 chunk ID 分页核查 Lite 指纹，缺失/不匹配恢复 pending，绝不重建原文。
-- [ ] **GREEN：实现 dense 查询。** 以monotonic创建query_timeout_seconds总预算并传给embedding.embed(deadline=...)，Lite.search接收剩余timeout_seconds；不得给每个重试重新算完整预算。嵌入查询→同一 dense 通道 overfetch=min(top_k*4,100)→相似度阈值过滤→批量 MySQL get→done/vector_id/指纹校验→保持分数顺序最多 top_k。答案<=1200 字符原样返回；更长时按完整句/列表项/表格行裁到上限，表格保留表头且至少一完整数据行，无可用完整单元跳过候选。无候选返回 []，依赖故障透传脱敏异常；不执行 LIKE，不按 ID 重排，不加关键词召回。
-- [ ] **验证与提交。** Task1–5回归通过；记录各故障点实际 pending/ID 证据，提交 `feat: recover knowledge dual writes and retrieve authoritative chunks`。
+- [x] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_service.py -v`，测试始终限定 retailq_test:3307 和临时 Lite 目录。
+- [x] **GREEN：实现批处理与恢复。** 每批读取有序 pending 快照→关闭 Session→嵌入→upsert 并核对返回 ID 集→带原内容指纹条件回填 done。失败不在同一次运行原地无限重试，使用 after_id 单调前进并汇总非零失败。仅在批次边界响应 stop；upsert后故障不改 done，重跑同 ID。reconcile 用全部 chunk ID 分页核查 Lite 指纹，缺失/不匹配恢复 pending，绝不重建原文。
+- [x] **GREEN：实现 dense 查询。** 以monotonic创建query_timeout_seconds总预算并传给embedding.embed(deadline=...)，Lite.search接收剩余timeout_seconds；不得给每个重试重新算完整预算。嵌入查询→同一 dense 通道 overfetch=min(top_k*4,100)→相似度阈值过滤→批量 MySQL get→done/vector_id/指纹校验→保持分数顺序最多 top_k。答案<=1200 字符原样返回；更长时按完整句/列表项/表格行裁到上限，表格保留表头且至少一完整数据行，无可用完整单元跳过候选。无候选返回 []，依赖故障透传脱敏异常；不执行 LIKE，不按 ID 重排，不加关键词召回。
+- [x] **验证与提交。** Task1–5回归通过；记录各故障点实际 pending/ID 证据，提交 `feat: recover knowledge dual writes and retrieve authoritative chunks`。
 
 ## Task 6：历史对话快照、批量 QA 抽取与暂存
 

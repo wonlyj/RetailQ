@@ -91,3 +91,18 @@ class SearchHit:
     id: int
     score: float
     fingerprint: str
+
+
+@dataclass(frozen=True)
+class VectorFailure:
+    chunk_id: int
+    code: str
+
+
+@dataclass(frozen=True)
+class VectorizeReport:
+    pending_before: int
+    done: int
+    failed: int
+    pending_after: int
+    failures: tuple[VectorFailure,...] = ()

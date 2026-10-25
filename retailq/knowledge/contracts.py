@@ -63,3 +63,12 @@ class DedupGroup:
             raise ValueError('choose exactly one representative or existing chunk')
         if not self.member_ids or len(set(self.member_ids)) != len(self.member_ids):
             raise ValueError('dedup group members must be unique and nonempty')
+
+
+@dataclass(frozen=True)
+class SourceDocument:
+    key: str
+    text: str
+    content_type: Literal['faq','policy','manual']
+    root_category: str
+    key_sections: tuple[str,...]

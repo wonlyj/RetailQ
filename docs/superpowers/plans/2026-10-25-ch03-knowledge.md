@@ -99,8 +99,8 @@ PowerShell 定义 `$ProjectPython = '.\.venv\Scripts\python.exe'`；Docker 可�
 
 section_path 固定为 `<清单相对文件路径>@<全文SHA256> / <标题路径> / 块<顺序号>`，区分来源/文档版本/重复段位置而不增列、不进入向量；超过 VARCHAR(512) 报错，不截短。同版本可幂等、改版作为追加形成独立链，旧版不自动删除。category 仅上级标题路径或 root_category，questions 不含这些身份信息。
 
-- [ ] **准备分词与示例格式。** 只新增 `tokenizers==0.22.1`，保留现有兼容锁版本；用 HTTPX 从固定 HF revision 只下载 tokenizer.json 到 artifacts/knowledge/assets，记录 SHA256，不下载权重。清单示例给出 `{"files":[{"path":"shipping-policy.md","content_type":"policy","root_category":"演示配送","key_sections":["配送规则/运费标准"]}]}`；FAQ 用问句标题，多个问法用标题后的 `问法：...` 行，正文为答案。拒绝清单根目录之外的相对路径。样例明确写演示，且 questions 不手工加入“邮费”来掩盖语义召回。
-- [ ] **RED：结构与边界。** `test_policy_heading_path_and_faq_real_questions`、`test_fenced_code_is_not_heading`、`test_complete_sentence_overlap_never_loses_new_text`、`test_table_chunks_repeat_header_with_escaped_pipes`、`test_oversized_sentence_or_row_reports_source`、`test_heading_and_header_count_towards_token_limit`、`test_metadata_is_absent_from_embedding_text`、`test_manifest_path_escape_and_field_overflow`。完整句去重拼回覆盖源正文；每表块同表头/分隔行；元数据用唯一哨兵断言不在向量文本。
+- [x] **准备分词与示例格式。** 只新增 `tokenizers==0.22.1`，保留现有兼容锁版本；用 HTTPX 从固定 HF revision 只下载 tokenizer.json 到 artifacts/knowledge/assets，记录 SHA256，不下载权重。清单示例给出 `{"files":[{"path":"shipping-policy.md","content_type":"policy","root_category":"演示配送","key_sections":["配送规则/运费标准"]}]}`；FAQ 用问句标题，多个问法用标题后的 `问法：...` 行，正文为答案。拒绝清单根目录之外的相对路径。样例明确写演示，且 questions 不手工加入“邮费”来掩盖语义召回。
+- [x] **RED：结构与边界。** `test_policy_heading_path_and_faq_real_questions`、`test_fenced_code_is_not_heading`、`test_complete_sentence_overlap_never_loses_new_text`、`test_table_chunks_repeat_header_with_escaped_pipes`、`test_oversized_sentence_or_row_reports_source`、`test_heading_and_header_count_towards_token_limit`、`test_metadata_is_absent_from_embedding_text`、`test_manifest_path_escape_and_field_overflow`。完整句去重拼回覆盖源正文；每表块同表头/分隔行；元数据用唯一哨兵断言不在向量文本。
 
 ```python
 def test_exact_embedding_template():
@@ -109,9 +109,9 @@ def test_exact_embedding_template():
     assert 'META_ONLY' not in embedding_text(draft)
 ```
 
-- [ ] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_markdown.py -v`，确认缺少切分行为；分词器缺下载/依赖不是有效红。
-- [ ] **GREEN：实现切分。** 纯 Python 状态机识别 ATX 标题、fence、段落、列表和表格，不引入大文档框架。章节→段落/结构单元→完整句递归，中文 `。！？`/英文终止标点连同后置引号归到前句，小数/URL 内句点不误切；无终止标点的最后一段保留为源文本完整单元。重叠只取上块尾部完整句/完整行，空间不足优先减重叠而不丢新内容。不可拆单元超 8192 token 明确拒绝。分别校验 category<=255、section_path<=512、TEXT utf8 字节<=65535。分词器使用 from_file、no_truncation、no_padding、encode(add_special_tokens=True)，不按字符猜 token。
-- [ ] **验证与提交。** 同命令通过，并将三份演示文档的切分预览、最大 token、原文覆盖/表头检查输出到 artifacts/knowledge/chunk-preview.json（不是检索效果报告）。任务 1/2 回归通过，提交 `feat: chunk Markdown knowledge with complete boundaries`。
+- [x] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_markdown.py -v`，确认缺少切分行为；分词器缺下载/依赖不是有效红。
+- [x] **GREEN：实现切分。** 纯 Python 状态机识别 ATX 标题、fence、段落、列表和表格，不引入大文档框架。章节→段落/结构单元→完整句递归，中文 `。！？`/英文终止标点连同后置引号归到前句，小数/URL 内句点不误切；无终止标点的最后一段保留为源文本完整单元。重叠只取上块尾部完整句/完整行，空间不足优先减重叠而不丢新内容。不可拆单元超 8192 token 明确拒绝。分别校验 category<=255、section_path<=512、TEXT utf8 字节<=65535。分词器使用 from_file、no_truncation、no_padding、encode(add_special_tokens=True)，不按字符猜 token。
+- [x] **验证与提交。** 同命令通过，并将三份演示文档的切分预览、最大 token、原文覆盖/表头检查输出到 artifacts/knowledge/chunk-preview.json（不是检索效果报告）。任务 1/2 回归通过，提交 `feat: chunk Markdown knowledge with complete boundaries`。
 
 ## Task 3：硅基流动 BGE-M3 嵌入适配器
 

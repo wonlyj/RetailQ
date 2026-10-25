@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     mysql_root_password: SecretStr = Field(default=SecretStr(""), repr=False)
     tool_timeout_seconds: float = Field(default=5, gt=0)
     tool_read_retries: int = Field(default=1, ge=0, le=1)
+    knowledge_tokenizer_path: str = 'artifacts/knowledge/assets/tokenizer.json'
 
     @field_validator("openai_base_url", "openai_model")
     @classmethod

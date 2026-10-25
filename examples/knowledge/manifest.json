@@ -1,0 +1,7 @@
+{
+  "files": [
+    {"path":"shipping-policy.md","content_type":"policy","root_category":"演示配送","key_sections":["配送规则/运费标准"]},
+    {"path":"product-faq.md","content_type":"faq","root_category":"演示商品","key_sections":[]},
+    {"path":"after-sales-manual.md","content_type":"manual","root_category":"演示售后","key_sections":["售后手册/退货条件"]}
+  ]
+}

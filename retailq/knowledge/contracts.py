@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
 
 @dataclass(frozen=True)
@@ -72,3 +72,8 @@ class SourceDocument:
     content_type: Literal['faq','policy','manual']
     root_category: str
     key_sections: tuple[str,...]
+
+
+class EmbeddingProvider(Protocol):
+    def embed(self,texts: list[str],*,deadline: float | None=None) -> list[list[float]]: ...
+    def close(self) -> None: ...

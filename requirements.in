@@ -6,3 +6,4 @@ pydantic-settings
 SQLAlchemy>=2,<3
 PyMySQL[rsa]>=1,<2
 tokenizers==0.22.1
+httpx==0.28.1

@@ -121,10 +121,10 @@ def test_exact_embedding_template():
 
 新增配置：`EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1`、`EMBEDDING_API_KEY` SecretStr、`EMBEDDING_MODEL=BAAI/bge-m3`（Literal）、`EMBEDDING_BATCH_SIZE=16`、`EMBEDDING_TIMEOUT_SECONDS=10`、`EMBEDDING_RETRIES=1`（0..1）、`KNOWLEDGE_TOKENIZER_PATH`。Settings新增is_embedding_configured:bool（只判断必要配置存在，不发请求）。独立于 OPENAI_*；缺 key 不覆盖聊天模型配置，不输出请求 Authorization/上游响应全文。
 
-- [ ] **RED：请求/结果契约。** HTTPX MockTransport 捕获 URL/JSON，`test_request_has_only_bge_parameters` 断言 model/input/encoding_format=float、没有 dimensions、metadata、chat key；`test_reverse_indices_restore_input_order`、`test_missing_duplicate_or_out_of_range_index_fails`、`test_wrong_dimension_nan_inf_zero_and_empty_fail`、`test_retry_budget_and_authentication_no_retry`。401/403/400 不重试，429/502/503/504/临时网络最多一次、Retry-After 不超过剩余 deadline；超过预算不再发请求。空批次返回 []，批内空串/超长串整批在发送前拒绝。
-- [ ] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_embedding.py -v`，记录实际失败原因。
-- [ ] **GREEN：实现 sync HTTPX 适配器。** 用 Client(timeout=...,trust_env=False) 和 Bearer 头，POST /embeddings；严格校验完整 JSON 结构、model 身份、条数、index 和有限实数（bool 不当 float），校验后统一归一化。HTTPX timeout 是 connect/read/write/pool 分项，不能当作完整逻辑总超时；调用前/重试前及返回后核对 deadline，工具外层仍保留总等待期限。将错误映射 `embedding_unavailable`/`embedding_invalid_response` 等脱敏 ServiceError，绝不返回 [] 伪装 miss。
-- [ ] **验证与提交。** 单测通过、pip check 无冲突；在任务 10 才做有凭据的真实调用。记录 mock 只证明适配器行为，提交 `feat: add validated BGE-M3 embedding client`。
+- [x] **RED：请求/结果契约。** HTTPX MockTransport 捕获 URL/JSON，`test_request_has_only_bge_parameters` 断言 model/input/encoding_format=float、没有 dimensions、metadata、chat key；`test_reverse_indices_restore_input_order`、`test_missing_duplicate_or_out_of_range_index_fails`、`test_wrong_dimension_nan_inf_zero_and_empty_fail`、`test_retry_budget_and_authentication_no_retry`。401/403/400 不重试，429/502/503/504/临时网络最多一次、Retry-After 不超过剩余 deadline；超过预算不再发请求。空批次返回 []，批内空串/超长串整批在发送前拒绝。
+- [x] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_embedding.py -v`，记录实际失败原因。
+- [x] **GREEN：实现 sync HTTPX 适配器。** 用 Client(timeout=...,trust_env=False) 和 Bearer 头，POST /embeddings；严格校验完整 JSON 结构、model 身份、条数、index 和有限实数（bool 不当 float），校验后统一归一化。HTTPX timeout 是 connect/read/write/pool 分项，不能当作完整逻辑总超时；调用前/重试前及返回后核对 deadline，工具外层仍保留总等待期限。将错误映射 `embedding_unavailable`/`embedding_invalid_response` 等脱敏 ServiceError，绝不返回 [] 伪装 miss。
+- [x] **验证与提交。** 单测通过、pip check 无冲突；在任务 10 才做有凭据的真实调用。记录 mock 只证明适配器行为，提交 `feat: add validated BGE-M3 embedding client`。
 
 ## Task 4：Windows Lite 文件库、集合身份与目录独占
 

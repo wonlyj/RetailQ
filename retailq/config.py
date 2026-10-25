@@ -26,13 +26,19 @@ class Settings(BaseSettings):
     tool_timeout_seconds: float = Field(default=5, gt=0)
     tool_read_retries: int = Field(default=1, ge=0, le=1)
     knowledge_tokenizer_path: str = 'artifacts/knowledge/assets/tokenizer.json'
+    embedding_base_url: str = 'https://api.siliconflow.cn/v1'
+    embedding_api_key: SecretStr = Field(default=SecretStr(''),repr=False)
+    embedding_model: Literal['BAAI/bge-m3'] = 'BAAI/bge-m3'
+    embedding_batch_size: int = Field(default=16,gt=0,le=128)
+    embedding_timeout_seconds: float = Field(default=10,gt=0,le=120)
+    embedding_retries: int = Field(default=1,ge=0,le=1)
 
-    @field_validator("openai_base_url", "openai_model")
+    @field_validator("openai_base_url", "openai_model", "embedding_base_url")
     @classmethod
     def strip_value(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("openai_base_url")
+    @field_validator("openai_base_url", "embedding_base_url")
     @classmethod
     def check_url(cls, value: str) -> str:
         if value:
@@ -60,6 +66,10 @@ class Settings(BaseSettings):
     @property
     def is_database_configured(self) -> bool:
         return bool(self.mysql_host and self.mysql_database and self.mysql_user and self.mysql_password.get_secret_value())
+
+    @property
+    def is_embedding_configured(self) -> bool:
+        return bool(self.embedding_base_url and self.embedding_api_key.get_secret_value().strip())
 
     @property
     def database_url(self):

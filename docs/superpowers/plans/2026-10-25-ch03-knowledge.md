@@ -75,7 +75,7 @@ PowerShell 定义 `$ProjectPython = '.\.venv\Scripts\python.exe'`；Docker 可�
 
 新增测试 marker `lite`（真实本地存储、不访问云端）；`mysql` 继续要求隔离测试库；真实云端评估走显式脚本，不让默认单测调用外网/收费服务。全量 `pytest -q` 应实际运行 mysql/lite，用例不可因环境缺失全 skip 后宣称通过。
 
-每个任务最后：将本任务真实结果即时写入 dev-notes，`git diff --check`，限定文件 `git add <本任务文件> dev-notes/ch03.md` 后本地提交。提交消息各任务已给出。开始实施前先提交已批准的 spec/plan/过程文档；本轮不做产品提交，不标完成任何任务步骤。
+每个任务最后：将本任务真实结果即时写入 dev-notes，`git diff --check`，限定文件 `git add <本任务文件> dev-notes/ch03.md` 后本地提交。提交消息各任务已给出。开始实施前先提交已批准的 spec/plan/过程文档；制定计划轮次未做产品提交；执行轮次按以下门禁逐项标记完成。
 
 ## Task 1：六表迁移、知识 DTO 与事务存储
 
@@ -191,11 +191,11 @@ def test_faq_contract_has_no_internal_fields(service):
 
 配置：`KNOWLEDGE_ENABLED=false`（未配key默认不阻断旧服务）、`KNOWLEDGE_SCHEDULE_ENABLED=true`（启用知识后默认启用每日作业）、`KNOWLEDGE_DATA_DIR=artifacts/knowledge`、`KNOWLEDGE_TOP_K=3`（1..20）、`KNOWLEDGE_MIN_SCORE=0.0`（-1..1，任务10校准后记录演示配置）、`KNOWLEDGE_CHUNK_TARGET=600`、`KNOWLEDGE_CHUNK_OVERLAP=100`（0<=overlap<target）、`KNOWLEDGE_SCHEDULE_HOUR=3`/`MINUTE=0`、`KNOWLEDGE_TIMEZONE=Asia/Shanghai`。另增KNOWLEDGE_DEDUP_MIN_SCORE=0.85、KNOWLEDGE_DEDUP_CANDIDATE_K=8供任务7/10统一传参和记录。Settings.is_knowledge_configured仅组合enabled及必要配置是否填写，不检查服务就绪。Windows无系统IANA库时显式添加并锁tzdata，不以宿主时区代替。
 
-- [ ] **RED：调度与关闭顺序。** `test_schedule_uses_shanghai_not_host_timezone`、`test_late_start_runs_once_without_replaying_missed_days`、`test_maintenance_is_single_job_while_reads_remain_bounded`、`test_cancelling_scheduler_waits_for_worker_before_close`、`test_timed_out_faq_thread_keeps_resources_until_done`、`test_stop_between_batches_leaves_recoverable_pending`、`test_disabled_or_missing_config_reports_not_ready`、`test_open_failure_releases_directory_and_clients`。用可控时钟/Event，不真实等到03:00或sleep几十秒；向量锁只包Lite调用，慢云端不阻塞已在内存完成的其他操作。
-- [ ] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_runtime.py tests/test_knowledge_cli.py -v`；CLI断言本章单元marker不访问真实云端。
-- [ ] **GREEN：实现资源与调度。** 每个实例一个路径owner；`asyncio.to_thread` 执行同步维护，shutdown 设stop并 shield 等待已提交作业结束，不把取消async等待当线程已停。每个阶段核对stop，关闭scheduler后通过工作线程调用runtime.close，等待在线操作计数也归零，随后才能close Session工厂、HTTP或Lite。每日触发串行mine并最终补pending；恢复时当天漏跑只执行一次并写清单，不重放多天。定时失败记录脱敏失败阶段/待补数量，下个周期能继续，状态ready不同于任务成功。
-- [ ] **GREEN：实现 CLI。** `python -m scripts.knowledge` 支持 `init-db --scope demo|test`（只调用任务1迁移）、`prepare-tokenizer`（只下载固定分词文件）、`import --manifest PATH`、`import-faq`、`vectorize`、`reconcile`、`mine [--resume RUN_ID]`、`status`、`query --text TEXT`；全局 `--data-dir PATH`、`--output PATH`。init-db 的scope硬校验库名/端口；其他维护在有owner冲突时明确退出，绝不强杀服务/删锁；status仅读MySQL时可不打开Lite并标向量未核验，其他调用独占资源。退出码0成功、1执行失败/未全部完成、2缺配置/依赖/目录占用；所有异常脱敏，保留pending不清库。
-- [ ] **验证与提交。** 在隔离临时目录用CLI跑 import→重复import→vectorize→status→关闭重开query；用fake云端验证协议，不称真实语义通过。任务1–8回归通过，提交 `feat: schedule resumable knowledge maintenance in one process`。
+- [x] **RED：调度与关闭顺序。** `test_schedule_uses_shanghai_not_host_timezone`、`test_late_start_runs_once_without_replaying_missed_days`、`test_maintenance_is_single_job_while_reads_remain_bounded`、`test_cancelling_scheduler_waits_for_worker_before_close`、`test_timed_out_faq_thread_keeps_resources_until_done`、`test_stop_between_batches_leaves_recoverable_pending`、`test_disabled_or_missing_config_reports_not_ready`、`test_open_failure_releases_directory_and_clients`。用可控时钟/Event，不真实等到03:00或sleep几十秒；向量锁只包Lite调用，慢云端不阻塞已在内存完成的其他操作。
+- [x] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_runtime.py tests/test_knowledge_cli.py -v`；CLI断言本章单元marker不访问真实云端。
+- [x] **GREEN：实现资源与调度。** 每个实例一个路径owner；`asyncio.to_thread` 执行同步维护，shutdown 设stop并 shield 等待已提交作业结束，不把取消async等待当线程已停。每个阶段核对stop，关闭scheduler后通过工作线程调用runtime.close，等待在线操作计数也归零，随后才能close Session工厂、HTTP或Lite。每日触发串行mine并最终补pending；恢复时当天漏跑只执行一次并写清单，不重放多天。定时失败记录脱敏失败阶段/待补数量，下个周期能继续，状态ready不同于任务成功。
+- [x] **GREEN：实现 CLI。** `python -m scripts.knowledge` 支持 `init-db --scope demo|test`（只调用任务1迁移）、`prepare-tokenizer`（只下载固定分词文件）、`import --manifest PATH`、`import-faq`、`vectorize`、`reconcile`、`mine [--resume RUN_ID]`、`status`、`query --text TEXT`；全局 `--data-dir PATH`、`--output PATH`。init-db 的scope硬校验库名/端口；其他维护在有owner冲突时明确退出，绝不强杀服务/删锁；status仅读MySQL时可不打开Lite并标向量未核验，其他调用独占资源。退出码0成功、1执行失败/未全部完成、2缺配置/依赖/目录占用；所有异常脱敏，保留pending不清库。
+- [x] **验证与提交。** 在隔离临时目录用CLI跑 import→重复import→vectorize→status→关闭重开query；用fake云端验证协议，不称真实语义通过。任务1–8回归通过，提交 `feat: schedule resumable knowledge maintenance in one process`。
 
 ## Task 9：原客服入口接入语义 query_faq
 

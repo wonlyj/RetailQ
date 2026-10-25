@@ -32,15 +32,16 @@ def complete_excerpt(answer: str,maximum: int=1200) -> str:
 
 
 class KnowledgeService:
-    def __init__(self,repository: KnowledgeRepository,embedding: EmbeddingProvider,vectors: MilvusKnowledgeStore,budget: BGETokenBudget,*,top_k: int=3,min_score: float=0.0,batch_size: int=16,query_timeout_seconds: float=5.0):
+    def __init__(self,repository: KnowledgeRepository,embedding: EmbeddingProvider,vectors: MilvusKnowledgeStore,budget: BGETokenBudget,*,top_k: int=3,min_score: float=0.0,batch_size: int=16,query_timeout_seconds: float=5.0,chunk_target_chars: int=600,chunk_overlap_chars: int=100):
         self.repository,self.embedding,self.vectors,self.budget=repository,embedding,vectors,budget
         self.top_k,self.min_score,self.batch_size=top_k,min_score,batch_size
         self.query_timeout_seconds=query_timeout_seconds
+        self.chunk_target_chars,self.chunk_overlap_chars=chunk_target_chars,chunk_overlap_chars
 
     def import_documents(self,documents: list[SourceDocument]) -> list[int]:
         result=[]
         for document in documents:
-            result.extend(self.repository.import_chunks(chunk_document(document,self.budget)))
+            result.extend(self.repository.import_chunks(chunk_document(document,self.budget,target_chars=self.chunk_target_chars,overlap_chars=self.chunk_overlap_chars)))
         return result
 
     def import_faq(self) -> list[int]:

@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     embedding_batch_size: int = Field(default=16,gt=0,le=128)
     embedding_timeout_seconds: float = Field(default=10,gt=0,le=120)
     embedding_retries: int = Field(default=1,ge=0,le=1)
+    knowledge_enabled: bool = False
+    knowledge_schedule_enabled: bool = True
+    knowledge_data_dir: str = 'artifacts/knowledge'
+    knowledge_top_k: int = Field(default=3,ge=1,le=20)
+    knowledge_min_score: float = Field(default=0.0,ge=-1,le=1)
+    knowledge_chunk_target: int = Field(default=600,gt=0)
+    knowledge_chunk_overlap: int = Field(default=100,ge=0)
+    knowledge_schedule_hour: int = Field(default=3,ge=0,le=23)
+    knowledge_schedule_minute: int = Field(default=0,ge=0,le=59)
+    knowledge_timezone: Literal['Asia/Shanghai'] = 'Asia/Shanghai'
+    knowledge_dedup_min_score: float = Field(default=0.85,ge=-1,le=1)
+    knowledge_dedup_candidate_k: int = Field(default=8,ge=1,le=32)
 
     @field_validator("openai_base_url", "openai_model", "embedding_base_url")
     @classmethod
@@ -53,6 +65,8 @@ class Settings(BaseSettings):
     def check_budget(self):
         if self.input_budget <= 0:
             raise ValueError("context window must exceed output reservation and safety margin")
+        if self.knowledge_chunk_overlap>=self.knowledge_chunk_target:
+            raise ValueError('knowledge overlap must be smaller than target')
         return self
 
     @property
@@ -70,6 +84,10 @@ class Settings(BaseSettings):
     @property
     def is_embedding_configured(self) -> bool:
         return bool(self.embedding_base_url and self.embedding_api_key.get_secret_value().strip())
+
+    @property
+    def is_knowledge_configured(self) -> bool:
+        return self.knowledge_enabled and self.is_embedding_configured and self.is_database_configured
 
     @property
     def database_url(self):

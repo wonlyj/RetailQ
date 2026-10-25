@@ -30,7 +30,7 @@ def business_tools(repository, context):
 
     @tool(args_schema=FAQInput)
     async def query_faq(keyword: str) -> dict:
-        """按用户原词关键词 LIKE 查询退货政策、运费、发票等 FAQ。禁止同义词扩展，邮费必须用邮费查询。"""
+        """根据用户原话查询退货政策、配送费用、商品FAQ和售后知识，支持相近问法。只依据返回内容回答。"""
         items = await asyncio.to_thread(repository.search_faq, keyword)
         return {'found':bool(items), 'items':items}
 

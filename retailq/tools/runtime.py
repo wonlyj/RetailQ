@@ -104,5 +104,5 @@ def build_registry(repository, context: ToolContext, settings: Settings) -> Tool
     from retailq.tools.business import business_tools
     registry = ToolRegistry(settings, repository, context)
     for tool in business_tools(repository, context):
-        registry.register(tool,retry_safe=tool.name != 'create_ticket')
+        registry.register(tool,retry_safe=tool.name not in ('create_ticket','query_faq'))
     return registry

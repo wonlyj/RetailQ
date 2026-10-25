@@ -54,11 +54,14 @@ def test_user_ownership_uses_exact_identifiers(repository,impostor):
     assert len(repository.load_messages(cid,'alice')) == 1
 
 
-def test_faq_literal_like_and_gap(repository):
-    assert repository.search_faq('退货政策')
-    assert repository.search_faq('运费')
-    for keyword in ['邮费', '%', '_', '\\', "' OR 1=1 --"]:
-        assert repository.search_faq(keyword) == []
+def test_faq_search_is_an_injected_semantic_boundary(test_database):
+    from retailq.repositories import ChatRepository
+    queries=[]
+    def search(query):queries.append(query);return []
+    repository=ChatRepository(test_database,faq_search=search)
+    for keyword in ['邮费','%','_','\\',"' OR 1=1 --"]:
+        assert repository.search_faq(keyword)==[]
+    assert queries==['邮费','%','_','\\',"' OR 1=1 --"]
 
 
 def pending_ticket(repository):

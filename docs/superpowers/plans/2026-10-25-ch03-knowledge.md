@@ -203,11 +203,11 @@ def test_faq_contract_has_no_internal_fields(service):
 
 **Interfaces:** `ChatRepository(database:Database,faq_search:Callable[[str],list[dict]]|None=None)`；`search_faq(keyword:str)->list[dict]` 委托注入，未配置时抛 `knowledge_not_configured` 503，不再查faq表。business_tools/build_registry/ChatService原调用接口不变；app lifespan 创建唯一runtime，把runtime.search_faq注入ChatRepository，启动scheduler并保存关闭顺序。只有选到query_faq才因缺知识配置失败，不影响其他四工具/售后提取。
 
-- [ ] **RED：契约/故障/无回退。** `test_faq_schema_and_result_shape_are_unchanged`、`test_faq_repository_delegates_without_sql_like`、`test_missing_knowledge_fails_only_faq_tool`、`test_embedding_fault_is_not_a_successful_miss`、`test_faq_retry_is_not_multiplied`、`test_lifespan_owns_one_store_and_shutdown_order`。断言原字段/strict/长度仍相同，结果不含score/section_path；记录SQL捕获证明生产search_faq不执行LIKE。FAQ由嵌入适配器管理最多一次重试，ToolRegistry把query_faq注册为retry_safe=false（其他读工具重试不改）；超时后底层有限操作仍由共享store锁保护，不能spawn无界线程或关闭仍使用的资源。
-- [ ] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_chat.py tests/test_tools.py tests/test_repositories.py tests/test_tool_chat.py -v`；将旧FAQ LIKE断言替换为委托/语义契约的预期红，不删除原身份/工单/历史/流式回归。
-- [ ] **GREEN：组装线上链路。** app仅在settings.is_knowledge_configured时组装runtime，缺配置时保留其他能力且FAQ单独报未配置；ChatRepository其他方法不动；FAQInput.keyword只更新description，保留原schema约束。工具描述移除关键词LIKE限制；客服Prompt说明语义知识依据、miss和服务故障区别，保留仅按返回事实/演示规则/无退款执行能力/简洁中文约束。本轮不改页面布局或新增API后台；health可加knowledge_configured/schedule_enabled但明确仅表示配置，不能当端到端探活。
-- [ ] **Prompt/数据评估准备。** 保留 ch02 历史评估文件原样，创建 ch03_cases.jsonl 替代其“邮费必然miss”业务预期；复用 scripts.evaluate_tools 的通用参数/报告能力，以新cases运行，不通过改写旧报告冒充回归。对FAQ语义本轮输出最多TopK的真实结果，最终回答数字/条件必须可追溯。
-- [ ] **验证与提交。** 默认完整测试含MySQL/Lite全过，售后提取/其他四工具/取消后工单持久化不回退；纯Prompt真实效果仍等待任务10。提交 `feat: route query_faq through dense semantic knowledge search`。
+- [x] **RED：契约/故障/无回退。** `test_faq_schema_and_result_shape_are_unchanged`、`test_faq_repository_delegates_without_sql_like`、`test_missing_knowledge_fails_only_faq_tool`、`test_embedding_fault_is_not_a_successful_miss`、`test_faq_retry_is_not_multiplied`、`test_lifespan_owns_one_store_and_shutdown_order`。断言原字段/strict/长度仍相同，结果不含score/section_path；记录SQL捕获证明生产search_faq不执行LIKE。FAQ由嵌入适配器管理最多一次重试，ToolRegistry把query_faq注册为retry_safe=false（其他读工具重试不改）；超时后底层有限操作仍由共享store锁保护，不能spawn无界线程或关闭仍使用的资源。
+- [x] **运行红。** `& $ProjectPython -m pytest tests/test_knowledge_chat.py tests/test_tools.py tests/test_repositories.py tests/test_tool_chat.py -v`；将旧FAQ LIKE断言替换为委托/语义契约的预期红，不删除原身份/工单/历史/流式回归。
+- [x] **GREEN：组装线上链路。** app仅在settings.is_knowledge_configured时组装runtime，缺配置时保留其他能力且FAQ单独报未配置；ChatRepository其他方法不动；FAQInput.keyword只更新description，保留原schema约束。工具描述移除关键词LIKE限制；客服Prompt说明语义知识依据、miss和服务故障区别，保留仅按返回事实/演示规则/无退款执行能力/简洁中文约束。本轮不改页面布局或新增API后台；health可加knowledge_configured/schedule_enabled但明确仅表示配置，不能当端到端探活。
+- [x] **Prompt/数据评估准备。** 保留 ch02 历史评估文件原样，创建 ch03_cases.jsonl 替代其“邮费必然miss”业务预期；复用 scripts.evaluate_tools 的通用参数/报告能力，以新cases运行，不通过改写旧报告冒充回归。对FAQ语义本轮输出最多TopK的真实结果，最终回答数字/条件必须可追溯。
+- [x] **验证与提交。** 默认完整测试含MySQL/Lite全过，售后提取/其他四工具/取消后工单持久化不回退；纯Prompt真实效果仍等待任务10。提交 `feat: route query_faq through dense semantic knowledge search`。
 
 ## Task 10：真实评估、中断演示、独立代码审查与交付
 

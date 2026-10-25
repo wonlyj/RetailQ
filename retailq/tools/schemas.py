@@ -18,7 +18,7 @@ class ProductInput(ToolInput):
 
 
 class FAQInput(ToolInput):
-    keyword: Identifier = Field(description='用户原话中的连续关键词，不扩展同义词；邮费保持邮费，不改成运费')
+    keyword: Identifier = Field(description='用户原话中的问题或相关短语，不添加用户未提供的条件')
 
 
 class TicketInput(ToolInput):

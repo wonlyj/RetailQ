@@ -2,15 +2,16 @@
 from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
+from collections.abc import Callable
 import json
 import secrets
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from retailq.db import Database
 from retailq.errors import ServiceError
-from retailq.models import Conversation, FAQ, Message, Ticket
+from retailq.models import Conversation, Message, Ticket
 from retailq.schemas import HistoryMessage
 
 
@@ -36,8 +37,9 @@ class MessageRecord:
 
 
 class ChatRepository:
-    def __init__(self, database: Database):
+    def __init__(self, database: Database,faq_search: Callable[[str],list[dict]] | None=None):
         self.database = database
+        self.faq_search = faq_search
 
     @staticmethod
     def _owned(session, cid: int, user_id: str, *, lock: bool = False):
@@ -93,12 +95,9 @@ class ChatRepository:
 
     @database_errors
     def search_faq(self, keyword: str) -> list[dict]:
-        with self.database.sessions() as session:
-            rows = session.scalars(select(FAQ).where(or_(
-                FAQ.question.contains(keyword, autoescape=True), FAQ.answer.contains(keyword, autoescape=True),
-                FAQ.category.contains(keyword, autoescape=True),
-            )).order_by(FAQ.id).limit(3)).all()
-            return [{'id': r.id, 'question': r.question, 'answer': r.answer[:1200], 'category': r.category} for r in rows]
+        if self.faq_search is None:
+            raise ServiceError('knowledge_not_configured',503,'知识查询未配置，请先完成知识库初始化。')
+        return self.faq_search(keyword)
 
     @database_errors
     def create_ticket(self, conversation_id: int, user_id: str, description: str,

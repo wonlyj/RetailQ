@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
+import asyncio
 
 import anyio
 from fastapi import Depends, FastAPI, Request
@@ -17,6 +18,8 @@ from retailq.context import prepare_extraction
 from retailq.errors import ServiceError
 from retailq.gateway import ModelGateway, OpenAIModelGateway
 from retailq.schemas import AfterSalesResult, ExtractRequest
+from retailq.knowledge.runtime import KnowledgeRuntime
+from retailq.knowledge.scheduler import DailyKnowledgeScheduler
 
 
 def get_gateway(request: Request) -> ModelGateway:
@@ -33,24 +36,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise RuntimeError("应用配置无效，请检查 .env 配置。") from None
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        gateway = OpenAIModelGateway(settings) if settings.is_ready else None
-        application.state.gateway = gateway
-        database = Database(settings) if settings.is_database_configured else None
-        service = ChatService(ChatRepository(database),gateway,settings) if database and gateway else None
-        application.state.chat_service = service
+        gateway=database=knowledge=scheduler=service=None
         try:
+            gateway = OpenAIModelGateway(settings) if settings.is_ready else None
+            application.state.gateway = gateway
+            database = Database(settings) if settings.is_database_configured else None
+            if database is not None and settings.is_knowledge_configured:
+                with anyio.CancelScope(shield=True):
+                    knowledge=await asyncio.to_thread(KnowledgeRuntime.open,settings,database)
+                if knowledge.pipeline is not None:
+                    scheduler=DailyKnowledgeScheduler(knowledge)
+            application.state.knowledge_runtime=knowledge
+            application.state.knowledge_scheduler=scheduler
+            service = ChatService(ChatRepository(database,faq_search=knowledge.search_faq if knowledge else None),gateway,settings) if database and gateway else None
+            application.state.chat_service = service
+            if scheduler is not None:scheduler.start()
             yield
         finally:
-            if service is not None:
-                with anyio.move_on_after(15,shield=True):
-                    await service.aclose()
-            if database is not None:
-                database.close()
-            if gateway is not None:
-                with anyio.move_on_after(5, shield=True):
-                    await gateway.aclose()
+            with anyio.CancelScope(shield=True):
+                try:
+                    if service is not None:
+                        with anyio.move_on_after(15,shield=True):await service.aclose()
+                finally:
+                    try:
+                        if scheduler is not None:await scheduler.stop()
+                    finally:
+                        try:
+                            if knowledge is not None:await asyncio.to_thread(knowledge.close)
+                        finally:
+                            try:
+                                if database is not None:database.close()
+                            finally:
+                                if gateway is not None:
+                                    with anyio.move_on_after(5,shield=True):await gateway.aclose()
 
-    application = FastAPI(title="RetailQ", version="0.2.0", lifespan=lifespan)
+    application = FastAPI(title="RetailQ", version="0.3.0", lifespan=lifespan)
     application.state.settings = settings
     application.include_router(chat_router)
     web_directory = Path(__file__).parent / "web"
@@ -66,7 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/health")
     async def health():
-        return {"status": "ok", "model_configured": settings.is_ready, "database_configured": settings.is_database_configured}
+        return {"status":"ok","model_configured":settings.is_ready,"database_configured":settings.is_database_configured}
 
     @application.post("/api/after-sales/extract", response_model=AfterSalesResult)
     async def extract_after_sales(

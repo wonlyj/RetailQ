@@ -12,7 +12,6 @@ from retailq.knowledge.qa_gateway import OpenAIQAGateway
 from retailq.knowledge.repository import KnowledgeRepository
 from retailq.knowledge.service import KnowledgeService
 from retailq.knowledge.token_budget import BGETokenBudget,TOKENIZER_REVISION,TOKENIZER_SHA256,verify_tokenizer
-from retailq.knowledge.vectors import MilvusKnowledgeStore
 
 
 class KnowledgeRuntime:
@@ -35,6 +34,8 @@ class KnowledgeRuntime:
                 verify_tokenizer(Path(settings.knowledge_tokenizer_path))
                 budget=BGETokenBudget(Path(settings.knowledge_tokenizer_path))
                 embedding=stack.enter_context(SiliconFlowEmbedding(settings,budget))
+                # PyMilvus loads .env at import; never import it in disabled mode.
+                from retailq.knowledge.vectors import MilvusKnowledgeStore
                 identity={'provider':'siliconflow','model':settings.embedding_model,'endpoint':settings.embedding_base_url.rstrip('/'),
                     'dimension':'1024','metric':'COSINE','text_template_version':'1','normalization_version':'l2-v1',
                     'tokenizer_revision':TOKENIZER_REVISION,'tokenizer_sha256':TOKENIZER_SHA256,'schema_version':'1'}

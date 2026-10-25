@@ -79,7 +79,7 @@ async def test_faq_and_late_ticket_commit(test_database, monkeypatch):
     from retailq.repositories import ChatRepository
     from retailq.tools.runtime import ToolContext, build_registry
     import time
-    repo = ChatRepository(test_database)
+    repo = ChatRepository(test_database,faq_search=lambda keyword:([{'id':1,'question':'退货政策','answer':'演示规则。','category':'售后'}] if keyword=='退货政策' else []))
     cid = repo.start_turn('alice', None, [], '配送延迟请投诉')
     repo.append_message(cid,'alice','assistant',None,[{'id':'call_1','type':'function','function':{'name':'create_ticket','arguments':'{}'}}])
     original = repo.create_ticket

@@ -1,7 +1,8 @@
 """MySQL is authoritative. Vector failures leave pending rows for the next run."""
+from __future__ import annotations
 import threading
 import time
-from typing import Callable
+from typing import Callable,TYPE_CHECKING
 
 from retailq.errors import ServiceError
 from retailq.knowledge.contracts import EmbeddingProvider,SourceDocument,VectorItem,VectorizeReport,VectorFailure
@@ -9,7 +10,8 @@ from retailq.knowledge.markdown import chunk_document,structures
 from retailq.knowledge.repository import KnowledgeRepository
 from retailq.knowledge.text import content_fingerprint,embedding_text,normalize_text
 from retailq.knowledge.token_budget import BGETokenBudget
-from retailq.knowledge.vectors import MilvusKnowledgeStore
+if TYPE_CHECKING:
+    from retailq.knowledge.vectors import MilvusKnowledgeStore
 
 
 def complete_excerpt(answer: str,maximum: int=1200) -> str:

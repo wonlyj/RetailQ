@@ -106,3 +106,31 @@ class VectorizeReport:
     failed: int
     pending_after: int
     failures: tuple[VectorFailure,...] = ()
+
+
+@dataclass(frozen=True)
+class MiningMessage:
+    id: int
+    role: str
+    content: str | None
+
+
+@dataclass(frozen=True)
+class ConversationSnapshot:
+    source_ref: str
+    conversation_id: int
+    max_message_id: int
+    messages: tuple[MiningMessage,...]
+
+
+@dataclass(frozen=True)
+class DedupCandidate:
+    anchor_id: int
+    staging: tuple[StagedQA,...]
+    existing: tuple[ChunkRecord,...]
+
+
+class QAGateway(Protocol):
+    def extract(self,batch: list[ConversationSnapshot]) -> list[QAProposal]: ...
+    def deduplicate(self,candidates: list[DedupCandidate]) -> list[DedupGroup]: ...
+    def close(self) -> None: ...

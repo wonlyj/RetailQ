@@ -5,11 +5,11 @@ from sqlalchemy import select, update
 
 from retailq.db import Database
 from retailq.errors import ServiceError
-from retailq.knowledge.contracts import ChunkDraft, ChunkRecord
-from retailq.knowledge.models import KnowledgeChunk
+from retailq.knowledge.contracts import ChunkDraft, ChunkRecord, QAProposal, StagedQA, MiningMessage, ConversationSnapshot
+from retailq.knowledge.models import KnowledgeChunk, QAStaging
 from retailq.knowledge.text import content_fingerprint
 from retailq.repositories import database_errors
-from retailq.models import FAQ
+from retailq.models import FAQ,Conversation,Message
 
 
 def record(row: KnowledgeChunk) -> ChunkRecord:
@@ -90,3 +90,41 @@ class KnowledgeRepository:
     def faq_drafts(self) -> list[ChunkDraft]:
         with self.database.sessions() as session:
             return [ChunkDraft(r.category,r.question,r.answer,f'legacy-faq/{r.id}','faq') for r in session.scalars(select(FAQ).order_by(FAQ.id))]
+
+    @database_errors
+    def closed_conversations(self) -> list[ConversationSnapshot]:
+        result=[]
+        with self.database.sessions() as session:
+            ids=session.scalars(select(Conversation.id).where(Conversation.status=='已结束').order_by(Conversation.id)).all()
+            for cid in ids:
+                rows=session.scalars(select(Message).where(Message.conversation_id==cid).order_by(Message.id)).all()
+                if not rows or rows[0].role!='user' or rows[-1].role!='assistant' or not rows[-1].content:continue
+                messages=tuple(MiningMessage(r.id,r.role,r.content) for r in rows)
+                result.append(ConversationSnapshot(f'conversation:{cid}:message:{rows[-1].id}',cid,rows[-1].id,messages))
+        return result
+
+    @staticmethod
+    def _staged(row):
+        return StagedQA(row.id,row.batch_no,row.source_ref,row.question,row.answer,row.status)
+
+    @database_errors
+    def stage(self,batch_no: str,proposals: list[QAProposal]) -> list[StagedQA]:
+        if not 1<=len(batch_no)<=64:raise ValueError('invalid batch number')
+        with self.database.sessions.begin() as session:
+            existing=session.scalars(select(QAStaging).where(QAStaging.batch_no.collate('utf8mb4_0900_bin')==batch_no)).all()
+            result=[]
+            for proposal in proposals:
+                if not proposal.source_ref or len(proposal.source_ref)>255:raise ValueError('invalid source reference')
+                if any(not s.strip() or len(s.encode('utf-8'))>65535 for s in [proposal.question,proposal.answer]):raise ValueError('QA TEXT limit')
+                match=next((r for r in existing if (r.source_ref,r.question,r.answer)==(proposal.source_ref,proposal.question,proposal.answer)),None)
+                if match is None:
+                    match=QAStaging(batch_no=batch_no,source_ref=proposal.source_ref,question=proposal.question,answer=proposal.answer,status='extracted')
+                    session.add(match);session.flush();existing.append(match)
+                result.append(self._staged(match))
+            return result
+
+    @database_errors
+    def staging(self,batch_nos: list[str]) -> list[StagedQA]:
+        with self.database.sessions() as session:
+            rows=session.scalars(select(QAStaging).where(QAStaging.batch_no.collate('utf8mb4_0900_bin').in_(batch_nos)).order_by(QAStaging.id))
+            return [self._staged(row) for row in rows]

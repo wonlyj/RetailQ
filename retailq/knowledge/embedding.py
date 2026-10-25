@@ -23,6 +23,7 @@ class SiliconFlowEmbedding:
             raise ServiceError('embedding_not_configured',503,'请在本地配置知识嵌入服务。')
         self.settings,self.budget=settings,budget
         self.http=httpx.Client(timeout=settings.embedding_timeout_seconds,trust_env=False,transport=transport,
+            proxy=settings.embedding_proxy.get_secret_value() or None,
             headers={'Authorization':'Bearer '+settings.embedding_api_key.get_secret_value()})
 
     def __enter__(self): return self

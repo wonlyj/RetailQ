@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     knowledge_tokenizer_path: str = 'artifacts/knowledge/assets/tokenizer.json'
     embedding_base_url: str = 'https://api.siliconflow.cn/v1'
     embedding_api_key: SecretStr = Field(default=SecretStr(''),repr=False)
+    embedding_proxy: SecretStr = Field(default=SecretStr(''),repr=False)
     embedding_model: Literal['BAAI/bge-m3'] = 'BAAI/bge-m3'
     embedding_batch_size: int = Field(default=16,gt=0,le=128)
     embedding_timeout_seconds: float = Field(default=10,gt=0,le=120)
@@ -60,6 +61,18 @@ class Settings(BaseSettings):
             if parsed.username or parsed.password or parsed.query or parsed.fragment:
                 raise ValueError("base URL must not contain credentials, query or fragment")
         return value
+
+    @field_validator('embedding_proxy')
+    @classmethod
+    def check_embedding_proxy(cls,value: SecretStr) -> SecretStr:
+        raw=value.get_secret_value().strip()
+        if raw:
+            parsed=urlsplit(raw)
+            if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.query or parsed.fragment:
+                raise ValueError('embedding proxy must be an HTTP(S) proxy URL')
+            if parsed.port is not None and not 1<=parsed.port<=65535:
+                raise ValueError('invalid embedding proxy port')
+        return SecretStr(raw)
 
     @model_validator(mode="after")
     def check_budget(self):

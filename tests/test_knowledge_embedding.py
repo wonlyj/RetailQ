@@ -91,3 +91,30 @@ def test_model_mismatch_and_retry_after_beyond_deadline():
     with client(slow) as adapter:
         with pytest.raises(ServiceError):adapter.embed(['知识'],deadline=time.monotonic()+0.2)
     assert calls==[1]
+
+
+def test_explicit_http_proxy_routes_without_resolving_destination():
+    from http.server import BaseHTTPRequestHandler,HTTPServer
+    import threading
+    from retailq.knowledge.embedding import SiliconFlowEmbedding
+    received=[]
+    class Proxy(BaseHTTPRequestHandler):
+        def log_message(self,*args):pass
+        def do_POST(self):
+            received.append((self.path,json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+            body=json.dumps(payload([[1.0]+[0.0]*1023])).encode()
+            self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+    server=HTTPServer(('127.0.0.1',0),Proxy)
+    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+    try:
+        settings=Settings(_env_file=None,embedding_api_key='test',embedding_base_url='http://embedding.invalid/v1',embedding_proxy=f'http://127.0.0.1:{server.server_port}',embedding_retries=0)
+        with SiliconFlowEmbedding(settings,Budget()) as adapter:
+            assert adapter.embed(['知识'])[0][0]==1
+        assert received[0][0]=='http://embedding.invalid/v1/embeddings'
+    finally:
+        server.shutdown();server.server_close();thread.join(timeout=2)
+
+
+def test_proxy_credentials_are_hidden():
+    settings=Settings(_env_file=None,embedding_proxy='http://user:proxy-credential@127.0.0.1:7890')
+    assert 'proxy-credential' not in repr(settings)

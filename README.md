@@ -1,5 +1,7 @@
 # RetailQ · 客服聊天工具链
 
+第3章正在验收：当前query_faq已接入BGE-M3与Milvus Lite。请先按[第3章手工验收清单](docs/ch03-manual-acceptance.md)执行建库、语义检索与恢复测试；真实云端验收和整体审查尚未完成。下文保留的第2章LIKE查询及“邮费漏召回”描述是历史基线，不代表当前实现。
+
 Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现有 SSE 聊天页接入 Function Calling：模型选择一个工具，执行、回灌结果，再生成真正的流式答复。保留第 1 章售后结构化提取。
 
 ## 已实现的工具与边界

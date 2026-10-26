@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from retailq.config import Settings
 from retailq.errors import ServiceError
+from retailq.model_output import ModelTextBuffer, require_plain_model_text
 from retailq.schemas import AfterSalesResult
 
 
@@ -95,6 +96,7 @@ class OpenAIModelGateway:
             reason = response.response_metadata.get('finish_reason')
             if response.invalid_tool_calls or not isinstance(response.content,str):
                 raise unsupported()
+            require_plain_model_text(response.content)
             if reason != ('tool_calls' if response.tool_calls else 'stop'):
                 raise ServiceError('invalid_tool_selection',502,'模型工具选择未完整结束，请重试。')
             ids = []
@@ -115,6 +117,7 @@ class OpenAIModelGateway:
     async def stream(self, messages: list[BaseMessage]) -> AsyncIterator[ModelChunk]:
         seen_text = False
         seen_finish = False
+        text_buffer = ModelTextBuffer()
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 async with aclosing(self.model.astream(messages)) as stream:
@@ -126,12 +129,15 @@ class OpenAIModelGateway:
                         reason = chunk.response_metadata.get("finish_reason")
                         if reason in ("tool_calls", "function_call"):
                             raise unsupported()
-                        if chunk.content:
+                        visible = text_buffer.push(chunk.content)
+                        if reason:
+                            visible += text_buffer.finish()
+                        if visible:
                             seen_text = True
                         if isinstance(reason, str) and reason:
                             seen_finish = True
-                        if chunk.content or reason:
-                            yield ModelChunk(chunk.content, reason)
+                        if visible or reason:
+                            yield ModelChunk(visible, reason)
                 if not seen_text:
                     raise unsupported()
                 if not seen_finish:

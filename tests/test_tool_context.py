@@ -50,3 +50,22 @@ def test_tool_answer_over_budget_and_no_tool_second_stage():
         prepare_tool_answer(prepared,selection,ToolMessage('字'*3000,tool_call_id='c1'),settings)
     final = prepare_tool_answer(prepared,AIMessage('第一阶段不是流式答案'),None,settings)
     assert final == prepared.messages
+
+
+def test_previous_dsml_answer_is_not_replayed_but_tool_receipt_and_user_text_survive():
+    from retailq.context import prepare_tool_chat,prepare_tool_answer
+    marker = '<｜｜DSML｜｜ calls>'
+    selection = AIMessage('',tool_calls=[{'id':'saved','name':'create_ticket','args':{'description':'配送延迟','ticket_type':'投诉'}}])
+    receipt = ToolMessage('{"ok":true,"data":{"ticket_no":"T1"}}',tool_call_id='saved')
+    leaked = AIMessage(marker)
+    historical = [HumanMessage('用户引用：'+marker),selection,receipt,leaked]
+    settings = Settings(_env_file=None)
+    prepared = prepare_tool_chat('下一问',[historical],[],settings)
+    assert prepared.messages[1].content == '用户引用：'+marker
+    assert prepared.messages[2].tool_calls == selection.tool_calls
+    assert prepared.messages[3] == receipt
+    assert all('DSML' not in message.content for message in prepared.messages if isinstance(message,AIMessage))
+    assert prepared.messages[4].content
+    assert leaked.content == marker
+    final = prepare_tool_answer(prepared,AIMessage(''),None,settings)
+    assert all('DSML' not in message.content for message in final if isinstance(message,AIMessage))

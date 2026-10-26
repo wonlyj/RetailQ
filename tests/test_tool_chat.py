@@ -134,6 +134,19 @@ def test_tool_failures_and_no_tool_contract(test_database, monkeypatch, case):
         assert 'password-secret' not in response.text
 
 
+def test_dsml_answer_is_not_streamed_or_saved_as_a_successful_reply(test_database):
+    upstream = ControlledToolUpstream(no_tool=True,chunks=['<','｜｜DS','ML｜｜ calls>'])
+    with run_server(upstream.app) as url,TestClient(create_app(chat_settings(url))) as client:
+        response = client.post('/api/chat/stream',json={'message':'运动鞋应该怎么清洁和存放','user_id':'alice'})
+        events = parse_sse(response.text)
+        assert events[-1][0] == 'error'
+        assert events[-1][1]['code'] == 'unsupported_tool_protocol'
+        assert not any(name in ('token','done','tool_status') for name,_ in events)
+        assert 'DSML' not in response.text
+        cid = events[0][1]['conversation_id']
+        assert [row.role for row in ChatRepository(test_database).load_messages(cid,'alice')] == ['user']
+
+
 @pytest.mark.anyio
 async def test_disconnect_after_ticket_commit_and_concurrent_409(test_database):
     upstream = ControlledToolUpstream([wire_call('create_ticket',{'description':'订单1001延迟','ticket_type':'投诉'})],gated=True)

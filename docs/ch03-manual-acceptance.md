@@ -43,7 +43,20 @@ $Docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
 2. 当前三份Markdown正常产生8个块。若库里已有FAQ或其他知识，总数可能大于8；不要据总数不同就删库。
 3. 新块先是pending，`vector_id`为空。若此前已成功向量化，同一批块保持done也是正常结果。
 
-在现有MySQL客户端执行以下只读SQL，保存结果：
+推荐从本机Windows Terminal/PowerShell进入MySQL，明确设置UTF-8 locale和连接字符集。下面方式已由用户在MySQL 8.4.13实际验证，能输入并显示中文；命令在PowerShell执行，不是在mysql>下执行：
+
+```powershell
+Set-Location 'D:\AI-Agent\RetailQ'
+docker compose -p retailq -f compose.yaml exec `
+  -e LANG=C.UTF-8 -e LC_ALL=C.UTF-8 `
+  mysql mysql --default-character-set=utf8mb4 -u retailq -p retailq
+```
+
+出现 `Enter password:` 时输入本地 `.env` 的 `MYSQL_PASSWORD`（不是MYSQL_ROOT_PASSWORD；输入时不显示字符），不要把口令发到聊天里。命令中的用户名和库名为本项目默认retailq；若本地改过配置，替换为实际MYSQL_USER和MYSQL_DATABASE。若docker不在PATH，可把docker替换为前面配置的 `& $Docker`。
+
+登录成功看到 `mysql>` 后先执行 `SELECT '中文测试';`，确认能显示中文，再粘贴下面整段SQL；多行输入时出现 `->` 正常，以最后的分号结束并执行。查询完输入 `exit;` 返回PowerShell。Docker Desktop容器终端的 `sh-5.1#` 是Linux Shell，不能直接执行SELECT；若它不能输入中文，改用上面的PowerShell连接方式，不需要改表或重建数据库。若使用数据库GUI客户端，直接在连接retailq库的SQL编辑器中运行即可。
+
+在 `mysql>` 或数据库客户端SQL编辑器执行以下只读SQL，保存结果：
 
 ```sql
 SELECT id, category, questions, answer, section_path, content_type,
@@ -89,7 +102,22 @@ FROM knowledge_chunks ORDER BY id;
 
 ## A4. 浏览器整链路与旧工具回归
 
-CLI全部结束后启动：
+先确认本地 `.env` 包含下面两行，然后停止旧Uvicorn进程并重新启动。CLI会临时启用知识模块，因此A3成功不代表在线模块已经开启；在线服务需要显式配置，且启动后不会热读取.env。
+
+```dotenv
+KNOWLEDGE_ENABLED=true
+KNOWLEDGE_SCHEDULE_ENABLED=false
+```
+
+可在PowerShell先做不联网的配置检查：
+
+```powershell
+& $ProjectPython -c "from retailq.config import Settings; s=Settings(); print('knowledge_enabled=',s.knowledge_enabled,'knowledge_configured=',s.is_knowledge_configured,'schedule_enabled=',s.knowledge_schedule_enabled)"
+```
+
+预期依次是True、True、False。若不符合，检查当前工作目录、.env以及同名进程环境变量。不要用 `/health` 的model_configured/database_configured推断知识模块已开启，这两个字段不检查知识开关。
+
+CLI全部结束后，在旧服务窗口按Ctrl+C并等待退出，再启动：
 
 ```powershell
 & $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000 --workers 1
@@ -124,22 +152,112 @@ CLI全部结束后启动：
 
 大表格复制表头、长文完整句重叠、围栏伪标题等结构情况目前由本地专项测试覆盖。现有小演示表格不足以单独证明“大表格按行切分”通过。
 
+### B1补充：模型把工具调用标记输出到正文
+
+2026-10-26网页反馈中，“双肩包湿了可以晒太阳吗”完成query_faq并回答；随后“运动鞋应该怎么清洁和存放”出现 `<｜｜DSML｜｜ calls>` 等标记。这是模型原生工具语法泄漏到正文，不是正常工具回执。数据库该轮没有标准tool_calls或role=tool记录；上一答保存后约7秒才收到下一问，不是发送间隔太短。真实上游原始响应未保存，不能仅凭记录继续断定是模型本身还是服务端解析器产生问题。
+
+当前后端修复在工具选择及流式正文两处拒绝这类标记，处理跨SSE片段拆开的标记，返回unsupported_tool_protocol错误而不把异常正文当成功答复保存。对已有历史，仅在构造模型上下文时替换异常assistant正文，保留原数据库记录及已完成的工具回执；不会把DSML文本解析成可执行工具或自动再试写操作。
+
+网页验证前重启Uvicorn（不带reload），建议新建对话，再分别问双肩包/运动鞋问题。若仍收到unsupported_tool_protocol，说明异常已被拦截，但该问题的实际客服回答仍未通过，需要记录模型服务返回格式；不能把拦截成功当成正确回答。正常结果应是query_faq工具状态、基于知识中表格的软刷轻刷/避免暴晒，不应出现DSML文本。此次未替用户请求云端重试，真实网页复测待用户反馈。
+
 ## B2. 对话挖掘、整体去重和续跑
 
-先停止Uvicorn。只抽取数据库中status为“已结束”、有完整最终助手答复的会话。页面中的“进行中”或“已转人工”不会自动成为挖掘来源；不要批量修改真实会话状态。可先只读检查：
+先停止Uvicorn。只抽取数据库中status为“已结束”、有完整最终助手答复的会话。页面中的“进行中”或“已转人工”不会自动成为挖掘来源；不要批量修改真实会话状态。按A1的PowerShell连接方式登录后，可直接使用中文SQL。
+
+在mysql>下完整执行SELECT，不要单独执行WHERE，也不要把中文状态替换成拼音。先只读检查：
 
 ```sql
 SELECT id, user_id, status FROM conversations
 WHERE status = '已结束' ORDER BY id;
 ```
 
-有合适的演示来源后执行：
+### B2.1 查询为空时，准备一条专用演示来源
+
+`Empty set`表示没有符合条件的数据，不是中文输入仍有问题。下一步是准备专用演示会话，然后运行mine。本例为人工构造的客服QA，只验证挖掘到落库的基本链路，不代表真实历史对话质量评估、跨批去重或全部标注集验收。
+
+以下SQL会向演示库新增专用标记为ch03-b2-manual-ebook的1个“已结束”会话、2条消息，不会更新或删除原有会话，也不会直接写知识表。示例选电子说明书，以免只抽到与现有配送/退货知识相同的内容后被正常去重。仅在演示库执行；同一终端串行重复执行会复用该标记及已有消息，不用于并发灌数。
+
+在mysql>下完整粘贴：
+
+```sql
+START TRANSACTION;
+
+INSERT INTO conversations (user_id, status)
+SELECT 'ch03-b2-manual-ebook', '已结束'
+WHERE NOT EXISTS (
+  SELECT 1 FROM conversations WHERE user_id = 'ch03-b2-manual-ebook'
+);
+
+SET @ch03_demo_id = (
+  SELECT MIN(id) FROM conversations WHERE user_id = 'ch03-b2-manual-ebook'
+);
+
+INSERT INTO messages (conversation_id, role, content)
+SELECT @ch03_demo_id, 'user', '纸质说明书丢了，在哪里看电子说明书？'
+WHERE NOT EXISTS (
+  SELECT 1 FROM messages WHERE conversation_id = @ch03_demo_id AND role = 'user'
+);
+
+INSERT INTO messages (conversation_id, role, content)
+SELECT @ch03_demo_id, 'assistant', '演示规则：可在商品详情页的资料下载入口查看电子说明书，具体以页面提供的资料为准。'
+WHERE NOT EXISTS (
+  SELECT 1 FROM messages WHERE conversation_id = @ch03_demo_id AND role = 'assistant'
+);
+
+COMMIT;
+```
+
+如果其中任一句报错，先执行 `ROLLBACK;` 并反馈错误，不要继续COMMIT。成功后只读检查：
+
+```sql
+SELECT c.id, c.user_id, c.status, m.id AS message_id, m.role, m.content
+FROM conversations AS c JOIN messages AS m ON m.conversation_id = c.id
+WHERE c.user_id = 'ch03-b2-manual-ebook'
+ORDER BY m.id;
+```
+
+预期同一个已结束会话、先user后assistant共2条消息。然后执行 `exit;` 回到PowerShell；确认Uvicorn已经停止。
+
+### B2.2 运行抽取、去重和向量化
+
+如果新开了PowerShell，先恢复变量，证据仍保存在本次验收目录；原窗口变量存在时可跳过：
+
+```powershell
+Set-Location 'D:\AI-Agent\RetailQ'
+$ProjectPython = (Resolve-Path '.\.venv\Scripts\python.exe').Path
+$Evidence = 'artifacts/verification/ch03/manual-20261026-110137'
+New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
+```
+
+有合适的演示来源后，在PowerShell执行：
 
 ```powershell
 & $ProjectPython -m scripts.knowledge mine --output "$Evidence/mine-1.json"
 & $ProjectPython -m scripts.knowledge status --output "$Evidence/status-after-mine.json"
 & $ProjectPython -m scripts.knowledge mine --output "$Evidence/mine-repeat.json"
 ```
+
+本专用样例首轮应抽到原用户问法及完整演示答案，最终知识为done、pending为0，报告complete为true。若之前没有等价知识，通常新增1条；若已有等价知识，被去重而没有新增也是合法结果，需核对对应已有原文。重复运行不应重复新增电子说明书知识。extracted等数值是整次run统计；库中有其他已结束来源时，不要求总计恰好为1。若complete为false或抽取为0，保存报告及对应run文件，不能把执行结束当作通过。
+
+继续在PowerShell验证新知识能被检索：
+
+```powershell
+& $ProjectPython -m scripts.knowledge query --text '没有纸质说明书还能在哪里查看' --output "$Evidence/query-mined-ebook.json"
+```
+
+应返回电子说明书的资料下载入口及页面资料限定。不要把演示规则当作真实商家承诺。
+
+2026-10-26该专用样例的真实反馈已核对：首轮mine为extracted=1/kept=1/vectorized=1/complete=true，重复mine为extracted=0/vectorized=0/complete=true；总知识9条、pending=0、done=9；暂存行kept，新知识id=9且done，改写查询首条返回id=9及完整答案。故本单例的抽取→暂存→入库→向量化→改写检索，以及重复扫描不新增，已有真实证据；跨批语义去重、条件差异保留和其他标注样例仍需单独验证。
+
+### B2.3 关于langchain-openai代理提示
+
+若出现 `langchain-openai injected a custom httpx transport ... disables httpx's proxy auto-detection`，这是SDK初始化时的WARNING，不是查询失败。它表示SDK为TCP连接选项构造自定义transport时，可能绕过HTTPX对环境变量/Windows系统代理的自动识别；依赖这种隐式代理的聊天模型调用可能受影响，不能把它理解为“全机代理失效”。
+
+本项目langchain-openai=1.7.2；离线知识runtime在聊天配置齐全时也会构建ChatOpenAI网关，所以纯query可能看到这条提醒，但该query实际只调用独立BGE嵌入客户端、Lite及MySQL，不调用聊天LLM。BGE的EMBEDDING_PROXY与这条ChatOpenAI提示分别配置；挖掘网关本身使用项目提供的同步HTTPX客户端、trust_env=False。当前成功报告不因这条警告失效，也不需要重建知识。
+
+官方提供 `http_socket_options=()` 或进程环境变量 `LANGCHAIN_OPENAI_TCP_KEEPALIVE=0` 关闭这项SDK注入；它们不是本项目自建客户端的代理配置开关，不能保证让trust_env=False的已有客户端自动使用系统代理。当前真实流程已成功，暂不为消除警告修改连接配置。若将来聊天/挖掘确实连接失败，再按该实际路径检查，不把warning本身当成失败。
+
+参考：[LangChain http_socket_options官方接口定义](https://reference.langchain.com/python/langchain-openai/chat_models/base/BaseChatOpenAI/http_socket_options)。
 
 记录run_id、extracted/kept/discarded/vectorized/complete，及 `artifacts/knowledge/runs/run-<run_id>.json` 对应运行记录（文件包含会话正文，反馈前检查隐私）。未完成run可用 `mine --resume '<run_id>'` 续跑；状态完整后重复扫描不应重复新增相同知识。用SQL核对暂存状态和最终知识：
 
@@ -152,9 +270,13 @@ FROM knowledge_chunks WHERE category = '对话知识' ORDER BY id;
 
 语义检查：问法来自真实用户，答案有完整客服证据；跨批次同义同条件合并，不同地区/门槛条件保留；猜测、注入、寒暄、随机订单个人信息不变成通用知识。标注样例在 `evals/ch03_mining.jsonl`，其导出对话在 `examples/knowledge/conversations.jsonl`；当前CLI不直接导入JSONL会话文件，不能把文件存在当作已经用真实LLM跑完。
 
-如果没有已结束演示来源，记“缺测试数据，未测”，不是通过。真实标注集的专用评估脚本仍待开发侧补齐。
+如果没有已结束演示来源且未执行B2.1，记“缺测试数据，未测”，不是通过。2026-10-26用户反馈时只读检查本机演示库：进行中62条、已转人工9条、已结束0条、暂存0条、对话知识0条；这是当时快照，后续以重新查询为准。在这样的数据状态下，空暂存不能单独证明抽取失败，零来源完成也不算挖掘验收通过。真实标注集的专用评估脚本仍待开发侧补齐。
+
+若其他终端仍不能输入中文，可将两个查询条件分别替换为 `HEX(status) = 'E5B7B2E7BB93E69D9F'`、`HEX(category) = 'E5AFB9E8AF9DE79FA5E8AF86'`。本机已验证中文连接可正常使用，无需日常改写成HEX。
 
 ## B3. 定时任务与目录占用
+
+2026-10-26用户明确“B3就不测试了”：本轮人工验收跳过本节，不记为已通过；以下步骤保留供后续参考。
 
 目录占用：在线服务运行时另开PowerShell执行 `scripts.knowledge query --text '邮费是多少'`，应明确报目录被占用，不能第二进程同时打开Lite。停止在线服务后同命令应恢复正常。
 

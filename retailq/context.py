@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 
 from retailq.config import Settings
 from retailq.errors import ServiceError
+from retailq.model_output import contains_tool_markup
 from retailq.prompts import build_chat_messages, build_extract_messages, load_system_prompt, schema_json
 from retailq.schemas import ChatRequest
 
@@ -98,7 +99,12 @@ def prepare_tool_chat(message: str, turns: list[list[BaseMessage]], tool_schemas
     schema_cost = len(json.dumps(tool_schemas,ensure_ascii=False,separators=(',',':')).encode('utf-8')) if tool_schemas else 0
     fixed_cost = estimate_tokens([system,user]) + schema_cost
     require_budget(fixed_cost,settings.input_budget)
-    kept, dropped = list(turns), 0
+    # Preserve successful tool receipts while keeping old malformed model output
+    # out of subsequent requests. Stored records and user/tool content stay intact.
+    kept = [[m.model_copy(update={'content':'上一轮模型回复格式异常，未得到有效答复。'})
+             if isinstance(m,AIMessage) and contains_tool_markup(m.content) else m
+             for m in turn] for turn in turns]
+    dropped = 0
     while kept and fixed_cost + estimate_tokens([m for t in kept for m in t]) > settings.input_budget:
         dropped += len(kept.pop(0))
     messages = [system,*[m for t in kept for m in t],user]

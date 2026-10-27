@@ -92,6 +92,14 @@ class CategorySuggestion(FrozenRecord):
         return normalize_category(value) if value is not None else None
 
 
+class CategoryCandidate(FrozenRecord):
+    group_id: Token
+    questions: tuple[str, ...]
+    answer: str
+    categories: tuple[str, ...]
+    catalog_truncated: bool
+
+
 class Timestamped(FrozenRecord):
     @field_validator('created_at', 'updated_at', 'accepted_at', 'decided_at', check_fields=False)
     @classmethod
@@ -206,6 +214,9 @@ class RunRecord(Timestamped):
     batches: tuple[BatchRecord, ...] = ()
     completed_batches: tuple[Digest, ...] = ()
     group_ids: tuple[Token, ...] = ()
+    # Frozen dedup intent precedes individual group files, so partial file writes
+    # can resume without asking a nondeterministic model to regroup the sources.
+    group_plan: tuple[ReviewGroup, ...] | None = None
     phase: RunPhase = 'queued'
     counters: RunCounters = Field(default_factory=RunCounters)
     error: SafeFailure | None = None

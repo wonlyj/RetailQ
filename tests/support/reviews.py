@@ -110,3 +110,50 @@ def reject():
 
 def group_batch_ids(group):
     return list(dict.fromkeys(m.batch_no for m in group.members))
+
+
+class ReviewGateway:
+    """Only model boundaries are deterministic; records/SQL/Lite remain real."""
+    def __init__(self, database=None):
+        self.database = database
+        self.extracted_refs = []
+        self.classified_ids = []
+
+    def extract(self, batch):
+        from retailq.knowledge.contracts import QAProposal
+        if self.database:
+            assert self.database.engine.pool.checkedout() == 0
+        self.extracted_refs.extend(s.source_ref for s in batch)
+        return [QAProposal(s.source_ref, s.messages[0].content, s.messages[-1].content,
+                           s.messages[-1].content) for s in batch]
+
+    def deduplicate(self, candidates):
+        from tests.test_knowledge_mining import Gateway
+        return Gateway().deduplicate(candidates)
+
+    def classify(self, candidates):
+        from retailq.knowledge.review_contracts import CategorySuggestion
+        self.classified_ids.extend(c.group_id for c in candidates)
+        return [CategorySuggestion(group_id=c.group_id, category='商品使用与保养',
+                                   reason='测试样例建议，需人工审核。') for c in candidates]
+
+
+def make_preparer(h, gateway=None, **kwargs):
+    from retailq.knowledge.review_preparation import ReviewPreparation
+    return ReviewPreparation(h.knowledge, h.repository, h.store,
+                              gateway or ReviewGateway(h.database), h.embedding,
+                              input_budget=30000, **kwargs)
+
+
+def queued_run_with_sources(h, sources, preparer=None):
+    from retailq.knowledge.review_contracts import (
+        PrepareCommand, OperationRecord, SelectionSummary, RunRecord, canonical_request_hash,
+    )
+    preparer = preparer or make_preparer(h)
+    command = PrepareCommand(request_key=RID, conversation_ids=tuple(s.conversation_id for s in sources))
+    h.store.put_operation(OperationRecord(operation_id=RID, run_id=RID, kind='prepare', command=command,
+                          request_hash=canonical_request_hash(command), source_snapshot=tuple(sources),
+                          selection=SelectionSummary(eligible_total=len(sources), selected=len(sources), remaining=0),
+                          rule_hash=preparer.rule_hash(), accepted_at=NOW.isoformat()), expected_revision=None)
+    return h.store.put_run(RunRecord(run_id=RID, rule_hash=preparer.rule_hash(), sources=tuple(sources),
+                           created_at=NOW.isoformat(), updated_at=NOW.isoformat()), expected_revision=None)

@@ -12,6 +12,7 @@ from retailq.config import Settings
 from retailq.context import estimate_tokens,require_budget
 from retailq.errors import ServiceError
 from retailq.knowledge.contracts import ConversationSnapshot,QAProposal,DedupGroup
+from retailq.knowledge.review_contracts import CategorySuggestion
 
 
 class ExtractedItem(BaseModel):
@@ -38,6 +39,11 @@ class DedupGroupModel(BaseModel):
 class DedupResult(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True)
     groups: list[DedupGroupModel]
+
+
+class ClassificationResult(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+    items: list[CategorySuggestion]
 
 
 def prompt(name):
@@ -95,3 +101,13 @@ class OpenAIQAGateway:
         if not candidates:return []
         output=self._invoke(DedupResult,prompt('qa_dedup.txt'),[asdict(c) for c in candidates])
         return [DedupGroup(tuple(g.member_ids),g.representative_id,g.target_chunk_id,tuple(g.questions)) for g in output.groups]
+
+    def classify(self, candidates):
+        if not candidates:
+            return []
+        output = self._invoke(ClassificationResult, prompt('qa_category.txt'),
+                              [c.model_dump(mode='json') for c in candidates])
+        ids = [item.group_id for item in output.items]
+        if len(ids) != len(set(ids)) or set(ids) != {c.group_id for c in candidates}:
+            raise ServiceError('knowledge_category_invalid', 502, '分类建议未完整匹配审核组，请重试。')
+        return output.items

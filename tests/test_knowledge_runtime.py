@@ -10,7 +10,7 @@ from retailq.config import Settings
 from retailq.errors import ServiceError
 
 
-def runtime(tmp_path,service=None,pipeline=None):
+def runtime(tmp_path,service=None):
     from retailq.knowledge.runtime import KnowledgeRuntime
     from retailq.knowledge.ownership import DirectoryOwner
     class Resource:
@@ -19,8 +19,11 @@ def runtime(tmp_path,service=None,pipeline=None):
     class Service:
         def search_faq(self,text):return [{'answer':'事实'}]
         def status(self):return {'pending':0,'done':0,'chunks':0}
+    from retailq.knowledge.repository import KnowledgeRepository
+    service=service or Service()
+    service.repository=KnowledgeRepository(None)
     settings=Settings(_env_file=None,knowledge_enabled=True,knowledge_data_dir=str(tmp_path))
-    return KnowledgeRuntime(service or Service(),DirectoryOwner(tmp_path).__enter__(),settings=settings,embedding=Resource(),vectors=Resource(),pipeline=pipeline)
+    return KnowledgeRuntime(service,DirectoryOwner(tmp_path).__enter__(),settings=settings,embedding=Resource(),vectors=Resource())
 
 
 def test_schedule_uses_shanghai_not_host_timezone():
@@ -62,17 +65,16 @@ def test_timed_out_faq_thread_keeps_resources_until_done(tmp_path):
 
 def test_maintenance_is_single_job_while_reads_remain_bounded(tmp_path):
     entered=threading.Event();release=threading.Event()
-    class Pipeline:
-        def run(self,**kwargs):
-            from retailq.knowledge.contracts import MiningReport
-            entered.set();release.wait(3)
-            return MiningReport('x',0,0,0,0,True)
-    instance=runtime(tmp_path,pipeline=Pipeline())
+    instance=runtime(tmp_path)
+    def maintenance():
+        lease=instance.reserve_maintenance()
+        try:entered.set();release.wait(3)
+        finally:lease.close()
     try:
         with ThreadPoolExecutor(1) as executor:
-            job=executor.submit(instance.maintain,'mine',{},threading.Event())
+            job=executor.submit(maintenance)
             assert entered.wait(2)
-            with pytest.raises(ServiceError):instance.maintain('mine',{},threading.Event())
+            with pytest.raises(ServiceError):instance.reserve_maintenance()
             assert instance.search_faq('问题')
             release.set();job.result(timeout=3)
     finally:release.set();instance.close()

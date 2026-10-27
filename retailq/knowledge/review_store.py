@@ -125,7 +125,8 @@ class ReviewStore:
         with self._lock:
             return self._put(self._path('operations', self._id(record.operation_id) + '.json'), record,
                              expected_revision, ('operation_id', 'run_id', 'kind', 'request_hash', 'command',
-                                                 'source_snapshot', 'selection', 'rule_hash', 'accepted_at'))
+                                                 'source_snapshot', 'selection', 'rule_hash', 'accepted_at',
+                                                 'reused_operation_id'))
 
     def list_operations(self):
         with self._lock:

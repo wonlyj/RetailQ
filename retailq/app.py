@@ -20,6 +20,7 @@ from retailq.gateway import ModelGateway, OpenAIModelGateway
 from retailq.schemas import AfterSalesResult, ExtractRequest
 from retailq.knowledge.runtime import KnowledgeRuntime
 from retailq.knowledge.scheduler import DailyKnowledgeScheduler
+from retailq.knowledge.review_jobs import ReviewJobs
 
 
 def get_gateway(request: Request) -> ModelGateway:
@@ -36,7 +37,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise RuntimeError("应用配置无效，请检查 .env 配置。") from None
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        gateway=database=knowledge=scheduler=service=None
+        gateway=database=knowledge=scheduler=service=jobs=None
         try:
             gateway = OpenAIModelGateway(settings) if settings.is_ready else None
             application.state.gateway = gateway
@@ -44,10 +45,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if database is not None and settings.is_knowledge_configured:
                 with anyio.CancelScope(shield=True):
                     knowledge=await asyncio.to_thread(KnowledgeRuntime.open,settings,database)
-                if knowledge.pipeline is not None:
+                jobs=ReviewJobs(knowledge)
+                if knowledge.can_prepare_review:
                     scheduler=DailyKnowledgeScheduler(knowledge)
             application.state.knowledge_runtime=knowledge
             application.state.knowledge_scheduler=scheduler
+            application.state.review_jobs=jobs
             service = ChatService(ChatRepository(database,faq_search=knowledge.search_faq if knowledge else None),gateway,settings) if database and gateway else None
             application.state.chat_service = service
             if scheduler is not None:scheduler.start()
@@ -59,16 +62,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         with anyio.move_on_after(15,shield=True):await service.aclose()
                 finally:
                     try:
-                        if scheduler is not None:await scheduler.stop()
+                        if jobs is not None:await jobs.aclose()
                     finally:
                         try:
-                            if knowledge is not None:await asyncio.to_thread(knowledge.close)
+                            if scheduler is not None:await scheduler.stop()
                         finally:
                             try:
-                                if database is not None:database.close()
+                                if knowledge is not None:await asyncio.to_thread(knowledge.close)
                             finally:
-                                if gateway is not None:
-                                    with anyio.move_on_after(5,shield=True):await gateway.aclose()
+                                try:
+                                    if database is not None:database.close()
+                                finally:
+                                    if gateway is not None:
+                                        with anyio.move_on_after(5,shield=True):await gateway.aclose()
 
     application = FastAPI(title="RetailQ", version="0.3.0", lifespan=lifespan)
     application.state.settings = settings

@@ -299,6 +299,7 @@ class OperationRecord(Timestamped):
     revision: Revision = 0
     accepted_at: str
     error: SafeFailure | None = None
+    reused_operation_id: Token | None = None
 
     @model_validator(mode='after')
     def correct_command(self):
@@ -309,6 +310,8 @@ class OperationRecord(Timestamped):
         expected_run = self.operation_id if self.kind == 'prepare' else self.command.run_id
         if self.run_id != expected_run:
             raise ValueError('operation run mismatch')
+        if self.reused_operation_id == self.operation_id:
+            raise ValueError('operation cannot alias itself')
         return self
 
 

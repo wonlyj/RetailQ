@@ -176,6 +176,11 @@ class ReviewQueries:
     def operation(self, operation_id):
         operation = self.store.get_operation(operation_id)
         phase, error = operation.phase, operation.error
+        if operation.reused_operation_id:
+            original = self.store.get_operation(operation.reused_operation_id)
+            if original.run_id != operation.run_id or original.kind != operation.kind or original.reused_operation_id:
+                raise review_error('knowledge_review_corrupt', '操作复用记录不一致。')
+            phase, error = original.phase, original.error
         if self.store.get_seal(operation.run_id):
             phase = 'sealed'
         return OperationView(operation_id=operation.operation_id, run_id=operation.run_id,

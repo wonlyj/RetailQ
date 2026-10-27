@@ -85,7 +85,7 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
         def __init__(self,settings):pass
         async def aclose(self):events.append('gateway-close')
     class Knowledge:
-        pipeline=object()
+        can_prepare_review=True
         def search_faq(self,query):return []
         def close(self):events.append('knowledge-close')
     def opened(settings,database):events.append('knowledge-open');return Knowledge()
@@ -93,13 +93,17 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
         def __init__(self,runtime):pass
         def start(self):events.append('schedule-start')
         async def stop(self):events.append('schedule-stop')
+    class Jobs:
+        def __init__(self,runtime):events.append('jobs-open')
+        async def aclose(self):events.append('jobs-close')
     monkeypatch.setattr(module,'Database',DB)
     monkeypatch.setattr(module,'OpenAIModelGateway',Gateway)
     monkeypatch.setattr(module,'KnowledgeRuntime',SimpleNamespace(open=opened))
     monkeypatch.setattr(module,'DailyKnowledgeScheduler',Scheduler)
+    monkeypatch.setattr(module,'ReviewJobs',Jobs)
     settings=Settings(_env_file=None,knowledge_enabled=True,embedding_api_key='test',mysql_password='test',openai_api_key='test',openai_model='test',openai_base_url='http://model.test/v1')
     application=module.create_app(settings)
     with TestClient(application) as client:
         assert client.get('/health').json()['model_configured'] is True
         assert application.state.knowledge_runtime is not None
-    assert events==['knowledge-open','schedule-start','schedule-stop','knowledge-close','db-close','gateway-close']
+    assert events==['knowledge-open','jobs-open','schedule-start','jobs-close','schedule-stop','knowledge-close','db-close','gateway-close']

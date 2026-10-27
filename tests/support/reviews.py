@@ -137,6 +137,9 @@ class ReviewGateway:
         return [CategorySuggestion(group_id=c.group_id, category='商品使用与保养',
                                    reason='测试样例建议，需人工审核。') for c in candidates]
 
+    def close(self):
+        pass
+
 
 def make_preparer(h, gateway=None, **kwargs):
     from retailq.knowledge.review_preparation import ReviewPreparation
@@ -217,3 +220,47 @@ def queued_seal(h, rid=RID, key='e'*32):
 def make_queries(h):
     from retailq.knowledge.review_queries import ReviewQueries
     return ReviewQueries(h.repository, h.knowledge, h.store, h.store.root / 'runs')
+
+
+def make_review_runtime(h, *, gateway=None):
+    from retailq.config import Settings
+    from retailq.knowledge.runtime import KnowledgeRuntime
+    from retailq.knowledge.ownership import DirectoryOwner
+    make_application(h)
+    settings = Settings(_env_file=None, knowledge_enabled=True, knowledge_schedule_enabled=False,
+                        knowledge_data_dir=str(h.store.root), context_window_tokens=31536)
+    return KnowledgeRuntime(h.service, DirectoryOwner(h.store.root).__enter__(), settings=settings,
+                             embedding=h.embedding, vectors=h.vectors, gateway=gateway)
+
+
+@pytest.fixture
+async def job_env(review_harness):
+    import asyncio
+    from threading import Event
+    from types import SimpleNamespace
+    from retailq.knowledge.review_jobs import ReviewJobs
+    from retailq.knowledge.review_contracts import PrepareCommand
+    h = review_harness
+    entered, release, exited = Event(), Event(), Event()
+    class Controlled(ReviewGateway):
+        def extract(self, batch):
+            entered.set()
+            try:
+                if not release.wait(10):
+                    raise TimeoutError('test must release the external model boundary')
+                return super().extract(batch)
+            finally:
+                exited.set()
+    gateway = Controlled(h.database)
+    source = seed_closed_source(h.database)
+    runtime = make_review_runtime(h, gateway=gateway)
+    jobs = ReviewJobs(runtime)
+    command = PrepareCommand(request_key=RID, conversation_ids=(source.conversation_id,))
+    env = SimpleNamespace(h=h, runtime=runtime, jobs=jobs, entered=entered, release=release,
+                          exited=exited, gateway=gateway, source=source, command=command)
+    try:
+        yield env
+    finally:
+        release.set()
+        await jobs.aclose()
+        await asyncio.to_thread(runtime.close)

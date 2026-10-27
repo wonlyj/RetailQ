@@ -57,12 +57,16 @@ class KnowledgeService:
         rows=self.repository.all_chunks()
         return {'chunks':len(rows),'pending':sum(r.vectorize_status=='pending' for r in rows),'done':sum(r.vectorize_status=='done' for r in rows)}
 
-    def vectorize_pending(self,*,stop: threading.Event | None=None,fault: Callable[[str],None] | None=None) -> VectorizeReport:
-        before=self.status()['pending']
+    def vectorize_pending(self,*,stop: threading.Event | None=None,fault: Callable[[str],None] | None=None,only_ids: tuple[int,...] | None=None) -> VectorizeReport:
+        def pending_count():
+            if only_ids is None:
+                return self.status()['pending']
+            return sum(r.vectorize_status=='pending' for r in self.repository.get_chunks(list(only_ids)).values())
+        before=pending_count()
         done=failed=after_id=0
         failures=[]
         while stop is None or not stop.is_set():
-            rows=self.repository.pending(self.batch_size,after_id)
+            rows=self.repository.pending(self.batch_size,after_id,only_ids=only_ids)
             if not rows:break
             after_id=rows[-1].id
             if fault:fault('after_mysql_pending')
@@ -86,7 +90,7 @@ class KnowledgeService:
                     confirmed=False
                 done+=int(confirmed);failed+=int(not confirmed)
                 if not confirmed:failures.append(VectorFailure(item.id,'knowledge_done_not_confirmed'))
-        return VectorizeReport(before,done,failed,self.status()['pending'],tuple(failures))
+        return VectorizeReport(before,done,failed,pending_count(),tuple(failures))
 
     def reconcile(self) -> list[int]:
         rows=[r for r in self.repository.all_chunks() if r.vectorize_status=='done']

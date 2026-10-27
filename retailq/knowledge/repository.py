@@ -57,11 +57,14 @@ class KnowledgeRepository:
             return [record(r) for r in session.scalars(select(KnowledgeChunk).order_by(KnowledgeChunk.id))]
 
     @database_errors
-    def pending(self,limit: int,after_id: int=0) -> list[ChunkRecord]:
+    def pending(self,limit: int,after_id: int=0,*,only_ids: tuple[int,...] | None=None) -> list[ChunkRecord]:
         if not 1 <= limit <= 10000:
             raise ValueError('invalid pending batch size')
         with self.database.sessions() as session:
-            rows=session.scalars(select(KnowledgeChunk).where(KnowledgeChunk.vectorize_status=='pending',KnowledgeChunk.id>after_id).order_by(KnowledgeChunk.id).limit(limit))
+            statement=select(KnowledgeChunk).where(KnowledgeChunk.vectorize_status=='pending',KnowledgeChunk.id>after_id)
+            if only_ids is not None:
+                statement=statement.where(KnowledgeChunk.id.in_(only_ids))
+            rows=session.scalars(statement.order_by(KnowledgeChunk.id).limit(limit))
             return [record(r) for r in rows]
 
     @database_errors

@@ -142,6 +142,8 @@ class ApplicationRecord(FrozenRecord):
     phase: Literal['prepared', 'applied', 'conflict']
     prepared: PreparedApplication
     error: SafeFailure | None = None
+    vector_requested_ids: tuple[DBID, ...] = ()
+    vector_confirmed_ids: tuple[DBID, ...] = ()
 
 
 class ReviewGroup(FrozenRecord):

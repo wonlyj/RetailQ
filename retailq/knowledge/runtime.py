@@ -166,6 +166,11 @@ class KnowledgeRuntime:
         except ServiceError as exc:
             if exc.status_code!=404:
                 raise
+        directory=self.review_store._path('runs',self.review_store._id(run_id))
+        if directory.exists() and any(not p.name.startswith('.audit-') for p in directory.iterdir()):
+            raise review_error('knowledge_review_corrupt','运行审计缺失但仍有组记录，请核查或终止并封存。')
+        if (self.root/'runs'/f'run-{run_id}.json').exists():
+            raise review_error('knowledge_legacy_readonly','旧版任务仅可查看，不能绕过人工审核继续发布。')
         original=self.review_store.get_operation(run_id)
         if original.kind!='prepare' or original.rule_hash is None:
             raise review_error('knowledge_review_corrupt','缺少准备任务冻结命令。')
@@ -372,16 +377,39 @@ class KnowledgeRuntime:
         return SafeFailure(code=exc.code if isinstance(exc,ServiceError) else 'knowledge_review_incomplete',
                            message=exc.public_message if isinstance(exc,ServiceError) else '任务未确认完成，请核查后继续。')
 
+    def mining_report(self, run_id):
+        run=self._read_run(run_id)
+        view=self.review_queries.run(run_id).summary
+        if view.counters is None:
+            raise review_error('knowledge_review_corrupt','无法核对审核任务计数，请核查。')
+        staged=self.service.repository.staging([b.batch_no for b in run.batches])
+        original=self.review_store.get_operation(run_id)
+        selection=original.selection
+        return {'run_id':run.run_id,'extracted':view.counters.extracted,
+            'kept':sum(r.status=='kept' for r in staged),'discarded':sum(r.status=='discarded' for r in staged),
+            'vectorized':view.counters.vectorized,'complete':run.phase=='completed','phase':run.phase,
+            'review_pending':view.counters.review_pending,
+            'eligible_total':selection.eligible_total if selection else len(run.sources),
+            'selected':selection.selected if selection else len(run.sources),
+            'remaining':selection.remaining if selection else 0}
+
     def maintain(self,action,options,stop):
         if action=='mine':
             command=(ResumeCommand(request_key=uuid.uuid4().hex,run_id=options['resume']) if options.get('resume') else
                      PrepareCommand(request_key=uuid.uuid4().hex))
-            admission=self.admit_review(command)
+            try:
+                admission=self.admit_review(command)
+            except ServiceError as exc:
+                if exc.code=='knowledge_review_pending' and not self.active_leases():
+                    pending=self.review_store.unfinished()
+                    if not isinstance(pending,AuditFault) and pending.phase=='waiting_review':
+                        return self.mining_report(pending.run_id)
+                raise
             operation=self.execute_review(admission.operation.operation_id,admission.lease,stop) if admission.lease else admission.operation
-            run=self._read_run(operation.run_id)
-            return {'run_id':run.run_id,'extracted':run.counters.extracted,'kept':run.counters.applied,
-                'discarded':run.counters.rejected,'vectorized':run.counters.vectorized,
-                'complete':run.phase=='completed','phase':run.phase,'review_pending':run.counters.review_pending}
+            report=self.mining_report(operation.run_id)
+            if operation.error:
+                report['error']=operation.error.model_dump()
+            return report
         lease=self.reserve_maintenance()
         try:
             lease.stop=stop

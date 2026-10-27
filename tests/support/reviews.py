@@ -264,3 +264,21 @@ async def job_env(review_harness):
         release.set()
         await jobs.aclose()
         await asyncio.to_thread(runtime.close)
+
+
+def review_runtime_factory(settings, database):
+    """CLI dependency injection: real runtime/storage, only external models fake."""
+    from pathlib import Path
+    from retailq.knowledge.runtime import KnowledgeRuntime
+    from retailq.knowledge.ownership import DirectoryOwner
+    from retailq.knowledge.repository import KnowledgeRepository
+    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from retailq.knowledge.service import KnowledgeService
+    from tests.support.knowledge import FakeEmbedding, TestBudget
+    from tests.test_knowledge_vectors import identity
+    owner = DirectoryOwner(Path(settings.knowledge_data_dir)).__enter__()
+    vectors = MilvusKnowledgeStore(owner.root / 'knowledge.db', identity())
+    embedding = FakeEmbedding()
+    service = KnowledgeService(KnowledgeRepository(database), embedding, vectors, TestBudget())
+    return KnowledgeRuntime(service, owner, settings=settings, embedding=embedding, vectors=vectors,
+                             gateway=ReviewGateway(database))

@@ -108,68 +108,13 @@ def test_equivalence_is_not_inferred_transitively():
     assert [set(g.member_ids) for g in groups]==[{1,2},{3}]
 
 
-@pytest.mark.mysql
-@pytest.mark.lite
-def test_resume_after_group_commit_before_checkpoint(service,tmp_path,monkeypatch):
-    from retailq.knowledge.mining import MiningPipeline
-    from tests.test_knowledge_extraction import snapshot,proposal
-    monkeypatch.setattr(service.repository,'closed_conversations',lambda:[snapshot()])
-    class Extractor(Gateway):
-        def extract(self,batch):return [proposal()]
-    original=service.repository.apply_dedup
-    def failed(groups):
-        original(groups)
-        raise RuntimeError('crash after committed group')
-    monkeypatch.setattr(service.repository,'apply_dedup',failed)
-    pipeline=MiningPipeline(service.repository,Extractor(),service.embedding,service,tmp_path/'runs')
-    first=pipeline.run()
-    assert not first.complete
-    count=len(service.repository.all_chunks())
-    monkeypatch.setattr(service.repository,'apply_dedup',original)
-    assert pipeline.run(resume_run_id=first.run_id).complete
-    assert len(service.repository.all_chunks())==count
-
-
-@pytest.mark.mysql
-@pytest.mark.lite
-def test_resume_after_each_phase_and_missing_run_manifest(service,tmp_path,monkeypatch):
-    from retailq.knowledge.mining import MiningPipeline
-    from retailq.knowledge.contracts import ConversationSnapshot,MiningMessage
-    snapshots=[ConversationSnapshot(f's{i}',i,2,(MiningMessage(1,'user',r.question),MiningMessage(2,'assistant',r.answer))) for i,r in enumerate(rows(),1)]
-    monkeypatch.setattr(service.repository,'closed_conversations',lambda:snapshots)
-    class Extractor(Gateway):
-        def __init__(self):super().__init__();self.failed=False
-        def extract(self,batch):
-            if not self.failed:
-                self.failed=True
-                raise ServiceError('knowledge_qa_invalid',502,'forced extraction failure')
-            return [QAProposal(s.source_ref,s.messages[0].content,s.messages[1].content,s.messages[1].content) for s in batch]
-    gateway=Extractor()
-    pipeline=MiningPipeline(service.repository,gateway,service.embedding,service,tmp_path/'runs')
-    first=pipeline.run()
-    assert not first.complete
-    result=pipeline.run(resume_run_id=first.run_id)
-    assert result.complete and result.kept==1 and result.discarded==1
-    count=len(service.repository.all_chunks())
-    for file in (tmp_path/'runs').glob('*.json'):file.unlink()
-    again=pipeline.run()
-    assert again.complete and len(service.repository.all_chunks())==count
-
-
-@pytest.mark.mysql
-@pytest.mark.lite
-def test_resume_after_dual_write_failure(service,tmp_path,monkeypatch):
-    from retailq.knowledge.mining import MiningPipeline
-    from tests.test_knowledge_extraction import snapshot,proposal
-    monkeypatch.setattr(service.repository,'closed_conversations',lambda:[snapshot()])
-    class Extractor(Gateway):
-        def extract(self,batch):return [proposal()]
-    original=service.vectorize_pending
-    def failed(**kwargs):raise RuntimeError('forced vector stage failure')
-    monkeypatch.setattr(service,'vectorize_pending',failed)
-    pipeline=MiningPipeline(service.repository,Extractor(),service.embedding,service,tmp_path/'runs')
-    first=pipeline.run()
-    assert not first.complete and service.status()['pending']>0
-    monkeypatch.setattr(service,'vectorize_pending',original)
-    assert pipeline.run(resume_run_id=first.run_id).complete
-    assert service.status()['pending']==0
+# Recovery coverage migrated with the review gate:
+# - SQL commit before checkpoint -> test_review_application.py::
+#   test_sql_commit_before_audit_confirmation_recovers_same_id
+# - extraction/checkpoint resume -> test_review_preparation.py::
+#   test_prepare_resume_skips_persisted_batches
+# - lost run audit must not trigger automatic publication -> test_review_entrypoints.py::
+#   test_missing_published_run_audit_cannot_be_recreated_as_unreviewed
+# - dual-write failure -> test_review_application.py::
+#   test_vector_failure_does_not_request_approval_again
+# Actual process termination evidence is owned by Task 10, not these unit hooks.

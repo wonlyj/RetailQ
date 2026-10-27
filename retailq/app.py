@@ -47,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     knowledge=await asyncio.to_thread(KnowledgeRuntime.open,settings,database)
                 jobs=ReviewJobs(knowledge)
                 if knowledge.can_prepare_review:
-                    scheduler=DailyKnowledgeScheduler(knowledge)
+                    scheduler=DailyKnowledgeScheduler(knowledge,jobs=jobs)
             application.state.knowledge_runtime=knowledge
             application.state.knowledge_scheduler=scheduler
             application.state.review_jobs=jobs

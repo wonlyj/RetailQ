@@ -90,7 +90,7 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
         def close(self):events.append('knowledge-close')
     def opened(settings,database):events.append('knowledge-open');return Knowledge()
     class Scheduler:
-        def __init__(self,runtime):pass
+        def __init__(self,runtime,jobs=None):pass
         def start(self):events.append('schedule-start')
         async def stop(self):events.append('schedule-stop')
     class Jobs:

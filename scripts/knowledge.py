@@ -88,7 +88,7 @@ def main(argv=None,*,settings=None,runtime_factory=None):
                     options={'faq':True} if args.action=='import-faq' else vars(args)
                     result=runtime.maintain(action,options,threading.Event())
                     if action=='vectorize' and (result['failed'] or result['pending_after']):code=1
-                    if action=='mine' and not result['complete']:code=1
+                    if action=='mine' and not result['complete'] and result.get('phase')!='waiting_review':code=1
     except (ServiceError,ValidationError,ImportError,ValueError,OSError) as exc:
         result={'error':{'code':exc.code if isinstance(exc,ServiceError) else 'knowledge_configuration_invalid',
             'message':exc.public_message if isinstance(exc,ServiceError) else '知识维护未完成，请检查本地配置、依赖及输入。'}}

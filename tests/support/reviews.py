@@ -212,3 +212,8 @@ def queued_seal(h, rid=RID, key='e'*32):
     return h.store.put_operation(OperationRecord(operation_id=key, run_id=rid, kind='seal',
                                 request_hash=canonical_request_hash(command), command=command,
                                 accepted_at=NOW.isoformat()), expected_revision=None)
+
+
+def make_queries(h):
+    from retailq.knowledge.review_queries import ReviewQueries
+    return ReviewQueries(h.repository, h.knowledge, h.store, h.store.root / 'runs')

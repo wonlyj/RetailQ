@@ -8,7 +8,7 @@ from typing import Annotated, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from retailq.knowledge.contracts import ConversationSnapshot
+from retailq.knowledge.contracts import ChunkRecord, ConversationSnapshot
 
 DBID = Annotated[int, Field(ge=1, le=2**63 - 1)]
 Revision = Annotated[int, Field(ge=0, le=2**53 - 1)]
@@ -318,3 +318,79 @@ class SealRecord(Timestamped):
     created_at: str
     reason: Annotated[str, Field(max_length=512)]
     actor: Literal['本机操作'] = '本机操作'
+
+
+class ConsoleSummary(FrozenRecord):
+    chunks: Nonnegative
+    counters: RunCounters | None
+    current_run_id: Token | None
+    phase: RunPhase | None
+    vector_verification: Literal['not_checked'] = 'not_checked'
+    error: SafeFailure | None = None
+
+
+class RunSummary(FrozenRecord):
+    run_id: Token
+    kind: Literal['review', 'legacy']
+    phase: str
+    counters: RunCounters | None
+    created_at: str | None
+    error: SafeFailure | None = None
+
+
+class RunDetail(FrozenRecord):
+    summary: RunSummary
+    sources: tuple[ConversationSnapshot, ...] | None
+    groups_count: Nonnegative | None
+    completed_batches: Nonnegative | None = None
+    total_batches: Nonnegative | None = None
+
+
+class GroupSummary(FrozenRecord):
+    group_id: Token
+    revision: Revision
+    question: str
+    disposition: Literal['new', 'merge', 'rejected', 'pending']
+    decision: Literal['pending', 'approved', 'rejected']
+    category: str | None
+    suggestion: CategorySuggestion | None
+
+
+class GroupDetail(FrozenRecord):
+    summary: GroupSummary
+    members: tuple[SourceQA, ...]
+    dispositions: tuple[MemberDisposition, ...] = ()
+    questions: tuple[str, ...]
+    answer: str
+    target_confirmed: bool
+    planned_target_id: DBID | None
+    target_chunk_id: DBID | None
+    application_phase: Literal['prepared', 'applied', 'conflict'] | None
+    vectorize_status: Literal['pending', 'done'] | None
+    error: SafeFailure | None = None
+
+
+class ChunkDetail(FrozenRecord):
+    record: ChunkRecord
+
+
+class OperationView(FrozenRecord):
+    operation_id: Token
+    run_id: Token
+    kind: Literal['prepare', 'resume', 'decide', 'retry_vectors', 'seal']
+    phase: OperationPhase
+    error: SafeFailure | None = None
+
+
+class LegacyTarget(FrozenRecord):
+    group_index: Nonnegative
+    chunk_id: DBID
+    disposition: Literal['legacy_explicit'] = 'legacy_explicit'
+
+
+class LegacyRunDetail(FrozenRecord):
+    run_id: Token
+    phase: str
+    sources: tuple[ConversationSnapshot, ...]
+    explicit_targets: tuple[LegacyTarget, ...]
+    missing_provenance: Nonnegative

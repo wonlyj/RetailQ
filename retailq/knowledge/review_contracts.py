@@ -71,6 +71,15 @@ class SourceQA(FrozenRecord):
     message_ids: Annotated[tuple[DBID, ...], Field(min_length=1)]
 
 
+class SourceSummary(FrozenRecord):
+    id: DBID
+    status: str
+    eligibility: bool
+    reason: str
+    message_count: Nonnegative
+    max_message_id: DBID | None
+
+
 class CategorySuggestion(FrozenRecord):
     group_id: Token
     category: str | None

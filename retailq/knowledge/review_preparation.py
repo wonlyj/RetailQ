@@ -140,14 +140,15 @@ class ReviewPreparation:
             raise
 
 
-def processed_sources(store):
+def processed_sources(store, repository):
     processed = set()
+    confirmed = {}
     for run in store.list_runs():
         if isinstance(run, AuditFault) or run.group_plan is None:
             continue
         for source in run.sources:
             fragments = [b for b in run.batches if any(s.conversation_id == source.conversation_id for s in b.sources)]
-            if not all(b.batch_no in run.completed_batches for b in fragments):
+            if not fragments or not all(b.batch_no in run.completed_batches for b in fragments):
                 continue
             members = []
             certain = True
@@ -159,6 +160,12 @@ def processed_sources(store):
                         members.append(group)
                     except ServiceError:
                         certain = False
-            if certain and all(g.application is not None and g.application.phase == 'applied' for g in members):
+            for group in members:
+                identity=(group.run_id,group.group_id)
+                if identity not in confirmed:
+                    confirmed[identity]=(group.application is not None and group.application.phase=='applied'
+                                         and repository.inspect_application(group)=='committed')
+                certain = certain and confirmed[identity]
+            if certain:
                 processed.add(source.source_ref)
     return frozenset(processed)

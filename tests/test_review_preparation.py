@@ -103,7 +103,7 @@ def test_sealed_partial_source_can_be_selected_again(review_harness):
     queued_run_with_sources(h, sources)
     make_preparer(h).prepare(RID, stop=Event())
     h.store.seal(RID, 'c'*32, '取消审核')
-    assert not processed_sources(h.store)
+    assert not processed_sources(h.store,h.repository)
 
 
 def test_no_qa_completes_without_pending_review(review_harness):
@@ -116,5 +116,5 @@ def test_no_qa_completes_without_pending_review(review_harness):
     queued_run_with_sources(h, [source], preparer)
     result = preparer.prepare(RID, stop=Event())
     assert result.phase == 'completed' and result.group_ids == ()
-    assert processed_sources(h.store) == frozenset({source.source_ref})
+    assert processed_sources(h.store,h.repository) == frozenset({source.source_ref})
     assert h.knowledge.all_chunks() == [] and vector_count(h) == 0

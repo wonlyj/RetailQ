@@ -42,6 +42,33 @@ def test_console_page_opens_when_knowledge_is_unconfigured():
         assert client.get('/knowledge', headers={'Host':'evil.example'}).status_code == 403
 
 
+def test_runtime_initialization_failure_keeps_static_page_and_reports_safe_503(monkeypatch):
+    from retailq.app import create_app
+    import retailq.app as module
+    from tests.test_review_api import ORIGIN
+    class Database:
+        def close(self): self.closed=True
+    database=Database()
+    database.closed=False
+    monkeypatch.setattr(module,'Database',lambda settings:database)
+    def unavailable(*args):
+        raise ServiceError('knowledge_setup_failed',503,'本地分词器未就绪。')
+    monkeypatch.setattr(module.KnowledgeRuntime,'open',unavailable)
+    settings=Settings(_env_file=None,mysql_password='fixture',knowledge_enabled=True,embedding_api_key='fixture')
+    with TestClient(create_app(settings),base_url=ORIGIN,client=('127.0.0.1',50000)) as client:
+        assert client.get('/knowledge').status_code==200 and client.get('/').status_code==200
+        for path in ('/api/knowledge/summary','/api/knowledge/runs'):
+            response=client.get(path)
+            assert response.status_code==503
+            assert response.json()['error']=={'code':'knowledge_setup_failed','message':'本地分词器未就绪。'}
+        assert client.get('/health').json()=={'status':'ok','model_configured':False,'database_configured':True}
+        from retailq.repositories import ChatRepository
+        with pytest.raises(ServiceError) as exc:
+            ChatRepository(database).search_faq('邮费是多少')
+        assert exc.value.code=='knowledge_not_configured'
+    assert database.closed
+
+
 def test_console_server_scope_rejects_demo_and_path_escape(tmp_path):
     from tests.support.review_console_server import validate_console_scope
     root = Path('artifacts/verification/ch03-review') / ('browser-unit-' + uuid.uuid4().hex)

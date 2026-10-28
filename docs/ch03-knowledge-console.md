@@ -42,6 +42,8 @@ EMBEDDING_API_KEY=本地填写
 
 打开 `/knowledge`。页面及管理API仅允许本机客户端、合法本机Host；写入还校验同源Origin、JSON与管理头。它是本机工作台，没有公网管理员登录系统。关闭页面不取消已受理的任务；停止服务会等待实际维护线程退出，再关闭Lite。
 
+知识runtime初始化失败时，静态页面仍能打开，管理API返回503和脱敏原因，FAQ也明确不可用；不会切换LIKE。修好分词器/目录占用等原因后重启服务，GET不会擅自重新初始化。
+
 ## 页面演示与验收
 
 1. 点击“开始挖掘”，选择1–100个不同会话。只允许已结束、首条用户消息/末条完整助手答复的来源；进行中、已转人工、工具调用未闭合的会话禁选。没有来源时可按[原验收清单B2.1](ch03-manual-acceptance.md#b21-查询为空时准备一条专用演示来源)新增专用演示来源，不批量结束真实会话。
@@ -51,6 +53,8 @@ EMBEDDING_API_KEY=本地填写
 5. 到“知识去向”查看确证chunk ID、最终category和向量状态，点击原文核对。planned ID仅为预定，不显示成已入库链接；状态冲突显示无法确证。ID按字符串传递，管理页支持超过JS安全整数的MySQL BIGINT。
 6. 刷新/重开页面后仍能查看任务；批准不可再改成拒绝。向量化失败时原文和批准保留，使用“重试向量化”；中断任务使用“继续任务”。两标签页的旧revision可能返回409，需要刷新核对。
 7. “终止并封存”需明确确认，等待活跃维护到安全边界。它保留已提交的原文、向量与审计，不是回滚；封存后不能继续旧命令，可创建新任务，未确证处理完的来源可重选。
+
+操作审计损坏时，只依据有效运行/组决定/别名/封存记录建立关联。归属无法确证的文件显示为独立故障记录，明确封存只确认该故障，不替其他任务做决定；可能还需分别处理另一个未结束任务。坏文件原字节保留，不从损坏JSON猜测批准。已applied的来源水位也会重新核对当前SQL成员及目标指纹，无法确证则允许在封存后重选。
 
 同时只允许一个未结束审核任务和一个实际维护作业。网页复用服务内唯一runtime，浏览器操作无需停机。**外部CLI建库/查询/维护仍须先停Uvicorn**，否则应报告目录占用，不启动第二个Lite客户端。
 
@@ -69,6 +73,8 @@ $Evidence = "artifacts/verification/ch03-review/category-$Run"
 ```
 
 输出report.json默认逐例pending，退出2表示待人工评，不是通过。13例覆盖已有类、新类、null、单次订单拒绝、注入、不同条件、多问法、长目录、超预算及人工覆盖。逐项检查完整问答、实际建议/理由、recommend_reject、目录裁剪和参考标签，在每例review中填写pass/fail及具体reason；不要改原始结果。先复制为reviewed.json，再编辑副本，保留原始报告：
+
+运行开始先保存完整样例清单，每取得一例结果即原子更新report.json；Ctrl+C后保留已完成结果、run_completed=false，返回2。部分报告不能汇总通过，完整重测请用新目录，保留中断证据。
 
 ```powershell
 Copy-Item -LiteralPath "$Evidence/report.json" -Destination "$Evidence/reviewed.json"
@@ -116,3 +122,5 @@ MySQL的knowledge_chunks是原文权威源，qa_extraction_staging是暂存。Li
 备份时停止所有持有knowledge目录的进程，使用现有MySQL客户端导出关联数据，并复制**整个关闭后的knowledge目录**，包括身份清单、owner文件、审计和Lite目录，成套保存恢复。只拷贝一个.db文件或只恢复向量不能恢复完整来源与决定。不要删除锁文件、down -v或覆盖用户现有库。
 
 代码：retailq/knowledge/review_*负责领域/准备/应用/查询/作业；retailq/api/knowledge*是本机API；retailq/web/knowledge*是页面。设计/计划见docs/superpowers，阶段过程见[dev-notes/ch03.md](../dev-notes/ch03.md)。
+
+开发回归额外使用现有Node.js执行真实前端模块的响应交错测试；会寻找系统Node或Codex附带Node，无npm依赖，运行应用无需Node。整体审查、修复验证及明确延期项见[审查记录](superpowers/reviews/2026-10-28-ch03-knowledge-console-review.md)。

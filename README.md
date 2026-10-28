@@ -9,7 +9,7 @@ Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现�
 | 工具 | 数据来源 |
 | --- | --- |
 | query_order / query_product / query_logistics | 工具内部随机生成的演示数据，不接真实电商或物流接口，不建对应表 |
-| query_faq | 开启知识功能时：BGE-M3 dense单路检索Milvus，MySQL知识原文确证；工具入出参不变。知识关闭时保留第2章faq表LIKE基线 |
+| query_faq | 知识就绪时：BGE-M3 dense单路检索Milvus，MySQL知识原文确证；工具入出参不变。关闭或未就绪时明确不可用；第2章LIKE仅为历史基线，无自动回退 |
 | create_ticket | 写入 tickets，关联当前会话并更新为已转人工；不表示即时接通人工或完成退款 |
 
 每次用户消息最多执行一个业务工具，没有Agent Loop。知识检索只跑dense单路，不加关键词召回、混合检索或重排。第一次模型请求绑定工具；第二次请求不提供工具，逐上游文本增量转发。工具参数由Pydantic严格校验；读工具超时/临时连接错误最多重试一次，工单写入不自动重试。写入超时只能说明结果未确认，成功工单及回执会保留。

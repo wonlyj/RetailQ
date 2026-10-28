@@ -28,7 +28,7 @@ class ReviewQueries:
     def sources(self, *, query='', eligibility='all', offset=0, limit=20):
         if eligibility not in ('all','eligible','ineligible'):
             raise ValueError('invalid eligibility filter')
-        processed=processed_sources(self.store)
+        processed=processed_sources(self.store,self.repository)
         items=[]
         position=0
         while True:

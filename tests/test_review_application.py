@@ -203,7 +203,7 @@ def test_partial_source_in_sealed_run_not_marked_fully_processed(review_harness)
         h.application.decide(op.operation_id, stop=Event())
     h.repository.apply_group = original
     h.application.seal(queued_seal(h).operation_id)
-    assert processed_sources(h.store) == frozenset()
+    assert processed_sources(h.store,h.repository) == frozenset()
 
 
 @pytest.mark.parametrize('scope,expected_done', [('all',2), ('none',0), ('one',1)])

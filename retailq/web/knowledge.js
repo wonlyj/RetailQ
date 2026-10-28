@@ -80,13 +80,18 @@ async function refresh() {
     if (!state.runId) { const candidate = summary.current_run_id || runs.items.find(r => r.kind === 'review')?.run_id; if (candidate) state.runId = candidate; }
     view.runPicker(runs,state.runId ? `${state.kind}:${state.runId}` : '');
     if (state.operationId) {
+      const polledOperationId = state.operationId, polledPending = state.pending;
       try {
-        const operation = await consoleRequest(`/operations/${state.operationId}`);
-        if (['succeeded','failed','interrupted','sealed'].includes(operation.phase)) {
+        const operation = await consoleRequest(`/operations/${polledOperationId}`);
+        if (state.operationId === polledOperationId && state.pending === polledPending &&
+            ['succeeded','failed','interrupted','sealed'].includes(operation.phase)) {
           state.busy = false; state.uncertain = false; state.pending = null; state.operationId = null;
           notify(operation.error?.message || (operation.phase === 'succeeded' ? '操作已完成，请查看实际审核结果与去向。' : view.phaseLabel(operation.phase)),Boolean(operation.error));
         }
-      } catch (error) { if (error.status !== 404 || !state.uncertain) throw error; }
+      } catch (error) {
+        if (state.operationId === polledOperationId && state.pending === polledPending &&
+            (error.status !== 404 || !state.uncertain)) throw error;
+      }
     }
     const chosen = `${state.kind}:${state.runId}`;
     if (state.runId && state.kind === 'review') {
@@ -153,22 +158,26 @@ async function write(path,data) {
   if (state.busy && (!isSeal || state.pending?.path === path)) return;
   // Explicit sealing supersedes polling/retrying this run's earlier command;
   // the server drains it at a safe boundary and keeps the immutable audit.
-  if (isSeal && state.pending?.path !== path) { state.pending = null; state.uncertain = false; }
+  if (isSeal && state.pending?.path !== path) {
+    state.pending = null; state.operationId = null; state.uncertain = false;
+  }
   if (state.pending && state.pending.signature !== signature) { notify('先确认上一请求状态，再提交其他操作。',true); return; }
   if (!state.pending) state.pending = {path,data,signature,key:newRequestKey()};
   const pending = state.pending;
   state.busy = true; editor(); $('startMining').disabled = true; $('submitMining').disabled = true;
   try {
     const operation = await consoleRequest(path,{method:'POST',body:{request_key:pending.key,...data}});
+    if (state.pending !== pending) return;
     state.operationId = operation.operation_id; state.uncertain = false;
     if (path === '/runs') { state.tab = 'review'; $('queueFilter').value = 'pending'; selectRun(operation.run_id,'review'); }
     $('miningDialog').close(); $('sealDialog').close(); notify('请求已受理，正在读取实际处理状态。');
   } catch (error) {
+    if (state.pending !== pending) return;
     state.busy = false;
     if (!error.status) { state.uncertain = true; state.operationId = pending.key; }
     else { state.pending = null; state.uncertain = false; }
     notify(error.message,true); editor();
-  } finally { state.delay = 1000; refresh(); }
+  } finally { if (state.pending === pending) { state.delay = 1000; refresh(); } }
 }
 async function decision(kind) {
   const detail = state.detail; if (!detail || state.busy || state.uncertain) return;

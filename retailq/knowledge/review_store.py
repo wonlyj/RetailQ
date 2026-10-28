@@ -1,6 +1,7 @@
 """Atomic local review audit. Callers own the runtime maintenance lease."""
 from datetime import datetime
 from pathlib import Path
+import hashlib
 import os
 import re
 import tempfile
@@ -93,6 +94,8 @@ class ReviewStore:
     def get_run(self, run_id):
         with self._lock:
             run = self._read(self._path('runs', self._id(run_id), 'run.json'), RunRecord)
+            if run.run_id != run_id:
+                raise review_error('knowledge_review_corrupt','运行记录与文件身份不一致。')
             return evolve(run, phase='sealed') if self.get_seal(run_id) else run
 
     def put_run(self, record, *, expected_revision):
@@ -107,7 +110,10 @@ class ReviewStore:
             return self._put(path, record, expected_revision, ('run_id', 'rule_hash', 'sources', 'created_at'))
 
     def get_group(self, run_id, group_id):
-        return self._read(self._path('runs', self._id(run_id), 'groups', self._id(group_id) + '.json'), ReviewGroup)
+        group=self._read(self._path('runs', self._id(run_id), 'groups', self._id(group_id) + '.json'), ReviewGroup)
+        if group.run_id != run_id or group.group_id != group_id:
+            raise review_error('knowledge_review_corrupt','审核组与文件身份不一致。')
+        return group
 
     def put_group(self, record, *, expected_revision):
         with self._lock:
@@ -119,7 +125,10 @@ class ReviewStore:
                               'target_fingerprint', 'questions', 'answer'))
 
     def get_operation(self, operation_id):
-        return self._read(self._path('operations', self._id(operation_id) + '.json'), OperationRecord)
+        operation=self._read(self._path('operations', self._id(operation_id) + '.json'), OperationRecord)
+        if operation.operation_id != operation_id:
+            raise review_error('knowledge_review_corrupt','操作记录与文件身份不一致。')
+        return operation
 
     def put_operation(self, record, *, expected_revision):
         with self._lock:
@@ -129,9 +138,71 @@ class ReviewStore:
                                                  'reused_operation_id'))
 
     def list_operations(self):
+        """Executable validated commands only; list_runs surfaces every fault."""
         with self._lock:
-            root = self._path('operations')
-            return tuple(self.get_operation(self._id(p.stem)) for p in sorted(root.glob('*.json')))
+            return self._scan_operations()[0]
+
+    def _scan_operations(self):
+        valid,bad=[],[]
+        for path in sorted(self._path('operations').glob('*.json')):
+            try:
+                valid.append(self.get_operation(self._id(path.stem)))
+            except ServiceError:
+                # Invalid filenames also occupy a stable diagnostic slot. Never
+                # parse broken JSON to guess a command, run or approval.
+                identity=(path.stem if re.fullmatch(r'[0-9a-f]{32}',path.stem) else
+                          hashlib.sha256(('operation-file:'+path.name).encode()).hexdigest()[:32])
+                bad.append(identity)
+        return tuple(valid),tuple(bad)
+
+    def operation_faults(self):
+        with self._lock:
+            return self._operation_faults(*self._scan_operations())
+
+    def _operation_faults(self, valid, bad):
+        if not bad:
+            return ()
+        bindings={identity:set() for identity in bad}
+        def bind(operation_id,run_id):
+            if operation_id in bindings:
+                bindings[operation_id].add(run_id)
+        for operation in valid:
+            if operation.reused_operation_id:
+                bind(operation.reused_operation_id,operation.run_id)
+        root=self._path('runs')
+        for directory in sorted(root.iterdir()) if root.exists() else ():
+            if not re.fullmatch(r'[0-9a-f]{32}',directory.name):
+                continue
+            rid=directory.name
+            try:
+                run=self.get_run(rid)
+                bind(run.run_id,run.run_id)  # A prepare's key equals its run ID.
+            except ServiceError:
+                pass
+            try:
+                marker=self.get_seal(rid)
+                if marker:
+                    bind(marker.operation_id,rid)
+            except ServiceError:
+                pass
+            for path in self._path('runs',rid,'groups').glob('*.json'):
+                try:
+                    group=self.get_group(rid,self._id(path.stem))
+                    if group.decision:
+                        bind(group.decision.operation_id,rid)
+                except ServiceError:
+                    pass
+        faults=[]
+        for identity in bad:
+            candidates=bindings[identity]
+            if len(candidates)==1:
+                rid=next(iter(candidates))
+                message=f'操作审计 {identity} 损坏；由有效记录关联到任务 {rid}，请核查或终止并封存。'
+            else:
+                rid=identity
+                message=f'操作审计 {identity} 损坏，归属无法确证；此ID仅表示独立故障记录。封存只确认本故障，其他未结束任务仍需分别处理。'
+            faults.append(AuditFault(run_id=rid,code='knowledge_operation_corrupt',message=message))
+        return tuple(faults)
 
     def list_runs(self):
         with self._lock:
@@ -151,7 +222,8 @@ class ReviewStore:
                     results.append(AuditFault(run_id=run_id, code='knowledge_review_corrupt',
                                                message='审核记录损坏或不完整，请核查或终止并封存。'))
             known = {r.run_id for r in results}
-            for operation in self.list_operations():
+            valid,bad=self._scan_operations()
+            for operation in valid:
                 if operation.kind == 'prepare' and operation.run_id not in known:
                     if operation.rule_hash is None:
                         results.append(AuditFault(run_id=operation.run_id, code='knowledge_review_corrupt',
@@ -160,6 +232,12 @@ class ReviewStore:
                         results.append(RunRecord(run_id=operation.run_id, rule_hash=operation.rule_hash,
                                                  sources=operation.source_snapshot, phase='interrupted',
                                                  created_at=operation.accepted_at, updated_at=operation.accepted_at))
+            # Faults replace untrustworthy task summaries but do not hide other
+            # valid tasks. A seal remains independently readable on restart.
+            by_id={r.run_id:r for r in results}
+            for fault in self._operation_faults(valid,bad):
+                by_id[fault.run_id]=fault
+            results=list(by_id.values())
             return tuple(results)
 
     def unfinished(self):
@@ -173,7 +251,10 @@ class ReviewStore:
 
     def get_seal(self, run_id):
         path = self._path('runs', self._id(run_id), 'sealed.json')
-        return self._read(path, SealRecord) if path.exists() else None
+        marker=self._read(path, SealRecord) if path.exists() else None
+        if marker and marker.run_id != run_id:
+            raise review_error('knowledge_review_corrupt','封存标记与文件身份不一致。')
+        return marker
 
     def seal(self, run_id, operation_id, reason):
         with self._lock:

@@ -57,6 +57,19 @@ def test_corrupt_record_blocks_new_run_and_can_be_sealed(tmp_path):
     store.put_run(make_run('b' * 32), expected_revision=None)
 
 
+def test_operation_identity_mismatch_is_a_visible_fault_not_a_trusted_binding(tmp_path):
+    from retailq.knowledge.review_contracts import AuditFault
+    store=make_store(tmp_path)
+    store.put_operation(make_operation(),expected_revision=None)
+    original=tmp_path/'reviews/operations'/f'{RID}.json'
+    wrong=original.with_name('f'*32+'.json')
+    wrong.write_bytes(original.read_bytes())
+    with pytest.raises(ServiceError):
+        store.get_operation('f'*32)
+    faults=[r for r in store.list_runs() if isinstance(r,AuditFault)]
+    assert any(r.run_id=='f'*32 for r in faults)
+
+
 def test_idempotency_key_different_command_conflicts(tmp_path):
     store = make_store(tmp_path)
     op = make_operation()

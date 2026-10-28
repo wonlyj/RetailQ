@@ -73,6 +73,58 @@ def test_labeled_cases_preserve_questions_conditions_and_human_override():
     assert all(c['questions'] and c['answer'] and c['expectation']['reason'] for c in cases.values())
 
 
+def test_interrupted_category_evaluation_keeps_each_actual_result_pending():
+    from retailq.config import Settings
+    from retailq.knowledge.review_contracts import CategorySuggestion
+    module=evaluator()
+    snapshots=[]
+    class Gateway:
+        calls=0
+        def classify(self,candidates):
+            self.calls+=1
+            if self.calls==2: raise KeyboardInterrupt()
+            return [CategorySuggestion(group_id=c.group_id,category='配送规则',reason='第一例实际结果') for c in candidates]
+    with pytest.raises(KeyboardInterrupt):
+        module.evaluate_cases(module.load_cases(module.DEFAULT_CASES),Settings(_env_file=None,context_window_tokens=31536),
+            Gateway(),checkpoint=lambda report:snapshots.append(copy.deepcopy(report)))
+    assert len(snapshots)>=2
+    assert snapshots[0]['results']==[] and snapshots[0]['run_completed'] is False
+    assert len(snapshots[-1]['results'])==1
+    assert snapshots[-1]['results'][0]['suggestion']['reason']=='第一例实际结果'
+    assert module.summarize_category_report(snapshots[-1])['status']=='pending'
+
+
+def test_cli_interrupt_preserves_partial_original_report_and_returns_pending(monkeypatch):
+    from pathlib import Path
+    import uuid
+    from retailq.config import Settings
+    from retailq.knowledge.review_contracts import CategorySuggestion
+    module=evaluator()
+    settings=Settings(_env_file=None,openai_base_url='http://fixture.invalid/v1',openai_api_key='fixture',
+        openai_model='fixture',context_window_tokens=31536)
+    monkeypatch.setattr(module,'Settings',lambda:settings)
+    class Gateway:
+        calls=0
+        def __init__(self,settings): pass
+        def __enter__(self): return self
+        def __exit__(self,*args): pass
+        def classify(self,candidates):
+            self.calls+=1
+            if self.calls==2: raise KeyboardInterrupt()
+            return [CategorySuggestion(group_id=c.group_id,category='配送规则',reason='保留的实际第一例输出') for c in candidates]
+    monkeypatch.setattr(module,'OpenAIQAGateway',Gateway)
+    output=Path('artifacts/verification/ch03-review')/('category-interrupt-test-'+uuid.uuid4().hex)
+    try:
+        result=module.main(['--output',str(output)])
+    except KeyboardInterrupt:
+        pytest.fail('CLI interruption escaped before preserving partial evidence')
+    assert result==2
+    report=json.loads((output/'report.json').read_text(encoding='utf-8'))
+    assert report['run_completed'] is False and len(report['results'])==1
+    assert report['results'][0]['suggestion']['reason']=='保留的实际第一例输出'
+    assert module.summarize_category_report(report)['status']=='pending'
+
+
 def test_collector_refuses_remote_or_confusing_urls_before_requests():
     assert importlib.util.find_spec('scripts.smoke_knowledge_console'), 'console evidence collector is missing'
     from scripts.smoke_knowledge_console import validate_base_url

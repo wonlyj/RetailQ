@@ -205,7 +205,7 @@ class KnowledgeRuntime:
         return existing
 
     def _freeze_selection(self, command):
-        processed=processed_sources(self.review_store)
+        processed=processed_sources(self.review_store,self.review_repository)
         summaries=[]
         offset=0
         while True:
@@ -232,6 +232,9 @@ class KnowledgeRuntime:
                 if isinstance(command,SealCommand) and existing:
                     return Admission(existing,None)
                 raise review_error('knowledge_review_sealed','任务已终止并封存。')
+            if not isinstance(command,SealCommand) and any(
+                    not self.review_store.get_seal(f.run_id) for f in self.review_store.operation_faults()):
+                raise review_error('knowledge_operation_corrupt','存在未封存的操作审计故障，请先核查并明确封存。')
             if self._review_closing and not (isinstance(command,SealCommand) and self._pending_seal==command.request_key):
                 raise ServiceError('knowledge_closing',503,'知识服务正在关闭。')
             if existing:
@@ -317,7 +320,8 @@ class KnowledgeRuntime:
             # Read failure is acceptable only when a physical run/prepare command
             # exists: sealing preserves its bytes and never needs model access.
             path=self.review_store._path('runs',self.review_store._id(command.run_id))
-            if not path.exists():
+            is_fault=any(f.run_id==command.run_id for f in self.review_store.operation_faults())
+            if not path.exists() and not is_fault:
                 self._read_run(command.run_id)
             alias=None
             if self._pending_seal:

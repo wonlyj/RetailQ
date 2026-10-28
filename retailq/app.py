@@ -40,16 +40,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         gateway=database=knowledge=scheduler=service=jobs=None
+        application.state.knowledge_failure=None
         try:
             gateway = OpenAIModelGateway(settings) if settings.is_ready else None
             application.state.gateway = gateway
             database = Database(settings) if settings.is_database_configured else None
             if database is not None and settings.is_knowledge_configured:
-                with anyio.CancelScope(shield=True):
-                    knowledge=await asyncio.to_thread(KnowledgeRuntime.open,settings,database)
-                jobs=ReviewJobs(knowledge)
-                if knowledge.can_prepare_review:
-                    scheduler=DailyKnowledgeScheduler(knowledge,jobs=jobs)
+                try:
+                    with anyio.CancelScope(shield=True):
+                        knowledge=await asyncio.to_thread(KnowledgeRuntime.open,settings,database)
+                except ServiceError as exc:
+                    # open() owns and releases partially initialized resources.
+                    # Keep the local page available to explain its safe failure;
+                    # no GET retries initialization and FAQ remains unavailable.
+                    application.state.knowledge_failure=exc
+                else:
+                    jobs=ReviewJobs(knowledge)
+                    if knowledge.can_prepare_review:
+                        scheduler=DailyKnowledgeScheduler(knowledge,jobs=jobs)
             application.state.knowledge_runtime=knowledge
             application.state.knowledge_scheduler=scheduler
             application.state.review_jobs=jobs

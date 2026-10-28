@@ -21,6 +21,9 @@ Search = Annotated[str, Query(max_length=200)]
 def runtime(request):
     instance = getattr(request.app.state, 'knowledge_runtime', None)
     if instance is None:
+        failure = getattr(request.app.state,'knowledge_failure',None)
+        if failure is not None:
+            raise ServiceError(failure.code,503,failure.public_message)
         raise ServiceError('knowledge_not_configured',503,'知识库未就绪，请检查本地知识功能配置与启动结果。')
     return instance
 

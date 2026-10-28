@@ -290,3 +290,73 @@ def test_queued_prepare_projects_before_worker_creates_run_file(api_env):
         assert before == {p.relative_to(env.root):p.read_bytes() for p in env.root.rglob('*.json')}
     finally:
         admission.lease.close()
+
+
+@pytest.mark.parametrize('corrupt_kind',['prepare','applied_decision','unbound_retry'])
+def test_corrupt_operation_survives_reopen_is_visible_and_can_be_explicitly_sealed(api_env,corrupt_kind):
+    from retailq.app import create_app
+    from retailq.knowledge.review_contracts import RetryVectorsCommand
+    env=api_env
+    rid,group=prepare(env)
+    corrupt_id=rid
+    if corrupt_kind != 'prepare':
+        decision_id=key()
+        response=env.client.post(f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}/decision',
+            json={'request_key':decision_id,'expected_revision':group['revision'],'decision':'approve','category':'售后手册'},headers=HEADERS)
+        assert wait(env,response.json()['operation_id']).phase=='succeeded'
+        corrupt_id=decision_id
+        if corrupt_kind=='unbound_retry':
+            command=RetryVectorsCommand(request_key=key(),run_id=rid)
+            admission=env.runtime.admit_review(command)
+            admission.lease.close()
+            corrupt_id=command.request_key
+    settings=env.runtime.settings
+    env.client.__exit__(None,None,None)
+    path=env.root/'reviews/operations'/f'{corrupt_id}.json'
+    path.write_bytes(b'{broken-operation')
+    expected_fault=corrupt_id if corrupt_kind=='unbound_retry' else rid
+    with TestClient(create_app(settings),base_url=ORIGIN,client=('127.0.0.1',50000)) as reopened:
+        assert reopened.app.state.knowledge_runtime is not None
+        assert reopened.get('/knowledge').status_code==200
+        summary=reopened.get('/api/knowledge/summary')
+        assert summary.status_code==200,summary.text
+        assert summary.json()['current_run_id']==expected_fault
+        assert summary.json()['counters'] is None
+        if corrupt_kind=='unbound_retry':
+            assert '归属' in summary.json()['error']['message']
+        response=reopened.post(f'/api/knowledge/runs/{expected_fault}/seal',
+            json={'request_key':key(),'confirm_run_id':expected_fault},headers=HEADERS)
+        assert response.status_code==202,response.text
+        assert reopened.portal.call(reopened.app.state.review_jobs.wait,response.json()['operation_id']).phase=='sealed'
+        assert path.read_bytes()==b'{broken-operation'
+        assert reopened.get('/api/knowledge/summary').json()['current_run_id'] is None
+        source=seed_closed_source(env.database,'封存坏操作后新来源','演示：仍需人工审核才能发布。')
+        response=reopened.post('/api/knowledge/runs',json={'request_key':key(),'conversation_ids':[str(source.conversation_id)]},headers=HEADERS)
+        assert response.status_code==202,response.text
+        assert reopened.portal.call(reopened.app.state.review_jobs.wait,response.json()['operation_id']).phase=='succeeded'
+
+
+@pytest.mark.parametrize('drift',['target','member'])
+def test_sealed_sql_conflict_source_is_selectable_again(api_env,drift):
+    from sqlalchemy import update
+    from retailq.knowledge.models import QAStaging
+    env=api_env
+    rid,group=prepare(env)
+    response=env.client.post(f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}/decision',
+        json={'request_key':key(),'expected_revision':group['revision'],'decision':'approve','category':'售后手册'},headers=HEADERS)
+    wait(env,response.json()['operation_id'])
+    detail=env.client.get(f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}').json()
+    source_id=env.runtime.review_store.get_run(rid).sources[0].conversation_id
+    with env.database.sessions.begin() as session:
+        if drift=='target':
+            session.execute(update(KnowledgeChunk).where(KnowledgeChunk.id==int(detail['target_chunk_id'])).values(answer='外部改变后的原文。'))
+        else:
+            session.execute(update(QAStaging).where(QAStaging.id==int(detail['members'][0]['staging_id'])).values(status='extracted'))
+    assert env.client.get(f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}').json()['target_confirmed'] is False
+    response=env.client.post(f'/api/knowledge/runs/{rid}/seal',json={'request_key':key(),'confirm_run_id':rid},headers=HEADERS)
+    wait(env,response.json()['operation_id'])
+    sources=env.client.get('/api/knowledge/sources',params={'query':str(source_id),'eligibility':'eligible'}).json()
+    assert any(s['id']==str(source_id) for s in sources['items'])
+    response=env.client.post('/api/knowledge/runs',json={'request_key':key(),'conversation_ids':[str(source_id)]},headers=HEADERS)
+    assert response.status_code==202,response.text
+    assert wait(env,response.json()['operation_id']).phase=='succeeded'

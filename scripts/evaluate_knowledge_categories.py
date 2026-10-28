@@ -10,6 +10,7 @@ from retailq.config import Settings
 from retailq.errors import ServiceError
 from retailq.knowledge.qa_gateway import OpenAIQAGateway, prompt
 from retailq.knowledge.review_classification import classify_groups
+from retailq.knowledge.mining import atomic_json
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = ROOT / 'evals/ch03_console_categories.jsonl'
@@ -43,13 +44,19 @@ def current_rules():
         'schema':(ROOT / 'retailq/knowledge/review_contracts.py').read_text(encoding='utf-8')})
 
 
-def evaluate_cases(cases, settings, gateway, *, cases_path=DEFAULT_CASES):
-    report = {'schema_version':1, 'case_ids':[c['id'] for c in cases], 'cases':cases,
+def initial_report(cases, settings, cases_path):
+    return {'schema_version':1, 'case_ids':[c['id'] for c in cases], 'cases':cases,
         'cases_hash':digest(cases), 'cases_path':str(Path(cases_path).resolve()), 'prompt':prompt('qa_category.txt'),
         'prompt_hash':digest(prompt('qa_category.txt')), 'rules_hash':current_rules(),
         'configured_model':settings.openai_model, 'configured_endpoint':settings.openai_base_url,
         'model_identity_note':'模型名为本地配置值，未独立证明远端部署身份。',
         'input_budget':settings.input_budget, 'run_completed':False, 'results':[]}
+
+
+def evaluate_cases(cases, settings, gateway, *, cases_path=DEFAULT_CASES, checkpoint=None):
+    report=initial_report(cases,settings,cases_path)
+    if checkpoint:
+        checkpoint(report)
     for case in cases:
         row = {'case_id':case['id'], 'questions':case['questions'], 'answer':case['answer'],
             'catalog':case['catalog'], 'expectation':case['expectation'],
@@ -73,7 +80,11 @@ def evaluate_cases(cases, settings, gateway, *, cases_path=DEFAULT_CASES):
         row['sent_to_model'] = bool(seen)
         row['provided_catalog'] = list(seen[0].categories) if seen else []
         report['results'].append(row)
+        if checkpoint:
+            checkpoint(report)
     report['run_completed'] = all(r['error'] is None for r in report['results'])
+    if checkpoint:
+        checkpoint(report)
     return report
 
 
@@ -134,11 +145,17 @@ def main(argv=None):
     try:
         cases = load_cases(args.cases)
         output.mkdir(parents=True)
+        def checkpoint(report):
+            atomic_json(output/'report.json',report)
+        # Keep the frozen complete case manifest even if gateway setup fails.
+        checkpoint(initial_report(cases,settings,args.cases))
         with OpenAIQAGateway(settings) as gateway:
-            report = evaluate_cases(cases,settings,gateway,cases_path=args.cases)
-        (output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8')
+            report = evaluate_cases(cases,settings,gateway,cases_path=args.cases,checkpoint=checkpoint)
         print(f'结果：{output / "report.json"}；逐例填写review.status/reason后运行--review。')
         return 1 if any(r['error'] for r in report['results']) else 2
+    except KeyboardInterrupt:
+        print('评估已中断；report.json保留已完成用例，run_completed=false，仍需完整重测与人工评审。')
+        return 2
     except (ValueError,OSError,ServiceError):
         print('评估未确认完成；保留输出目录，请检查配置或样例。')
         return 2

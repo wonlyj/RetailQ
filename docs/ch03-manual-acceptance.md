@@ -1,6 +1,6 @@
 # 第3章手工验收与反馈清单
 
-状态：实现任务1–9已完成；任务10的真实云端语义评估、精确断点跨进程恢复、独立整体审查及finish尚未完成。本清单用于收集实际结果，不代表全章验收通过。按用户要求，代理及网络配置由用户自行处理，开发侧停止继续尝试。
+状态：已新增[知识审核工作台与新版验收指南](ch03-knowledge-console.md)，所有对话挖掘入口改为“先审核，再入库”。本地真实MySQL/Lite、跨进程kill恢复已验证；新版分类与真实BGE/网页业务效果待用户反馈。旧B2的自动发布结果仅保留为2026-10-26历史证据，不代表新版人工审核已通过。代理由用户自行处理，开发侧不再尝试。
 
 ## 0. 测试约定和准备
 
@@ -237,9 +237,9 @@ New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
 & $ProjectPython -m scripts.knowledge mine --output "$Evidence/mine-repeat.json"
 ```
 
-本专用样例首轮应抽到原用户问法及完整演示答案，最终知识为done、pending为0，报告complete为true。若之前没有等价知识，通常新增1条；若已有等价知识，被去重而没有新增也是合法结果，需核对对应已有原文。重复运行不应重复新增电子说明书知识。extracted等数值是整次run统计；库中有其他已结束来源时，不要求总计恰好为1。若complete为false或抽取为0，保存报告及对应run文件，不能把执行结束当作通过。
+新版首轮应抽到原用户问法及完整答案，阶段到waiting_review、complete=false、尚未发布；这是正常退出0。重复mine复用待审任务，不自动入库。若之前已有等价知识，会产生待人工确认的归并候选。启动单worker服务，打开 `/knowledge` 核对来源，选择最终category后通过或拒绝；通过且完成向量化后才应显示done。准备阶段的complete=false不能当作故障，也不能当作整条链路通过。网页本身可以直接选择该演示来源，无需先运行CLI。
 
-继续在PowerShell验证新知识能被检索：
+审核完成后先停Uvicorn，再在PowerShell验证新知识能被检索：
 
 ```powershell
 & $ProjectPython -m scripts.knowledge query --text '没有纸质说明书还能在哪里查看' --output "$Evidence/query-mined-ebook.json"
@@ -247,7 +247,7 @@ New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
 
 应返回电子说明书的资料下载入口及页面资料限定。不要把演示规则当作真实商家承诺。
 
-2026-10-26该专用样例的真实反馈已核对：首轮mine为extracted=1/kept=1/vectorized=1/complete=true，重复mine为extracted=0/vectorized=0/complete=true；总知识9条、pending=0、done=9；暂存行kept，新知识id=9且done，改写查询首条返回id=9及完整答案。故本单例的抽取→暂存→入库→向量化→改写检索，以及重复扫描不新增，已有真实证据；跨批语义去重、条件差异保留和其他标注样例仍需单独验证。
+历史证据（2026-10-26，旧自动发布版本）：首轮mine为extracted=1/kept=1/vectorized=1/complete=true，重复mine为extracted=0/vectorized=0/complete=true；总知识9条、pending=0、done=9；暂存行kept，新知识id=9且done，改写查询首条返回id=9及完整答案。它证明当时电子说明书单例链路；不算新版人工分类/审核或全标注集验收。
 
 ### B2.3 关于langchain-openai代理提示
 
@@ -259,18 +259,18 @@ New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
 
 参考：[LangChain http_socket_options官方接口定义](https://reference.langchain.com/python/langchain-openai/chat_models/base/BaseChatOpenAI/http_socket_options)。
 
-记录run_id、extracted/kept/discarded/vectorized/complete，及 `artifacts/knowledge/runs/run-<run_id>.json` 对应运行记录（文件包含会话正文，反馈前检查隐私）。未完成run可用 `mine --resume '<run_id>'` 续跑；状态完整后重复扫描不应重复新增相同知识。用SQL核对暂存状态和最终知识：
+新版记录run_id、phase、extracted/review_pending/kept/discarded/vectorized/complete，审计位于 `artifacts/knowledge/reviews/`；旧 `runs/run-*.json` 只读，缺失新增目标ID时页面显示未知。未完成run可用页面“继续任务”或停机后的 `mine --resume '<run_id>'`；waiting_review仍需人工决定。以下原始行查询只核对SQL，不证明来源去向；精确关联请看工作台或只读采集器。人工category可变化，不再按统一“对话知识”筛选：
 
 ```sql
 SELECT id, batch_no, source_ref, question, answer, status
 FROM qa_extraction_staging ORDER BY id;
-SELECT id, questions, answer, vectorize_status
-FROM knowledge_chunks WHERE category = '对话知识' ORDER BY id;
+SELECT id, category, questions, answer, vectorize_status
+FROM knowledge_chunks ORDER BY id;
 ```
 
 语义检查：问法来自真实用户，答案有完整客服证据；跨批次同义同条件合并，不同地区/门槛条件保留；猜测、注入、寒暄、随机订单个人信息不变成通用知识。标注样例在 `evals/ch03_mining.jsonl`，其导出对话在 `examples/knowledge/conversations.jsonl`；当前CLI不直接导入JSONL会话文件，不能把文件存在当作已经用真实LLM跑完。
 
-如果没有已结束演示来源且未执行B2.1，记“缺测试数据，未测”，不是通过。2026-10-26用户反馈时只读检查本机演示库：进行中62条、已转人工9条、已结束0条、暂存0条、对话知识0条；这是当时快照，后续以重新查询为准。在这样的数据状态下，空暂存不能单独证明抽取失败，零来源完成也不算挖掘验收通过。真实标注集的专用评估脚本仍待开发侧补齐。
+如果没有合格来源，记“缺测试数据，未测”，不是通过。2026-10-26曾观察到演示库已结束0条；只是当时快照，当前以页面/SQL为准，空暂存不能单独证明抽取失败。新版分类标注评估与GET采集脚本已提供，准确命令见工作台指南；实际语义由用户运行并逐例填写理由。
 
 若其他终端仍不能输入中文，可将两个查询条件分别替换为 `HEX(status) = 'E5B7B2E7BB93E69D9F'`、`HEX(category) = 'E5AFB9E8AF9DE79FA5E8AF86'`。本机已验证中文连接可正常使用，无需日常改写成HEX。
 
@@ -280,7 +280,7 @@ FROM knowledge_chunks WHERE category = '对话知识' ORDER BY id;
 
 目录占用：在线服务运行时另开PowerShell执行 `scripts.knowledge query --text '邮费是多少'`，应明确报目录被占用，不能第二进程同时打开Lite。停止在线服务后同命令应恢复正常。
 
-定时任务：有B2的来源和聊天配置后，把 `.env` 的 `KNOWLEDGE_SCHEDULE_ENABLED=true`，设置上海时区几分钟后的 `KNOWLEDGE_SCHEDULE_HOUR` 和 `KNOWLEDGE_SCHEDULE_MINUTE`，重启单worker服务。到点核对 `artifacts/knowledge/schedule.json` 和运行报告；complete为true且实际有来源处理才算语义挖掘证据。当天已有last_attempt记录会阻止再次执行；遇到这种情况反馈“当日已运行”，不要删除状态文件冒充首次调度。测后恢复03:00及期望的开关。
+定时任务默认关闭。若以后明确开启，配置 `KNOWLEDGE_SCHEDULE_ENABLED=true` 及上海时区时刻，重启单worker；到点仍只准备到waiting_review、complete=false，再由人审核，不自动发布。当天已有last_attempt会阻止重复执行，不删状态冒充首次；测后恢复03:00并关闭开关。当前用户已跳过这项人工验收，本地scheduler门禁回归不冒充该项真实语义通过。
 
 ## 反馈模板
 

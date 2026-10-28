@@ -220,3 +220,73 @@ def test_processed_source_is_visible_but_not_selectable(api_env):
     source = next(s for s in data['items'] if s['id'] == str(cid))
     assert source['eligibility'] is False and '处理' in source['reason']
     assert env.client.get('/api/knowledge/sources', params={'query':str(cid),'eligibility':'eligible'}).json()['total'] == 0
+
+
+def test_unreviewed_qa_is_not_retrievable_then_reviewed_category_and_source_survive_reopen(api_env):
+    from retailq.app import create_app
+    env = api_env
+    rid, group = prepare(env)
+    assert env.runtime.service.repository.all_chunks() == []
+    assert env.runtime.service.search_faq('如何保养') == []
+    response = env.client.post(f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}/decision',
+        json={'request_key':key(),'expected_revision':group['revision'],'decision':'approve','category':'人工确认的已有类'},
+        headers=HEADERS)
+    assert wait(env,response.json()['operation_id']).phase == 'succeeded'
+    detail_path = f'/api/knowledge/runs/{rid}/groups/{group["group_id"]}'
+    before = env.client.get(detail_path).json()
+    settings = env.runtime.settings
+    env.client.__exit__(None,None,None)
+    with TestClient(create_app(settings),base_url=ORIGIN,client=('127.0.0.1',50000)) as reopened:
+        after = reopened.get(detail_path).json()
+        assert after['target_confirmed'] and after['target_chunk_id'] == before['target_chunk_id']
+        assert after['members'] == before['members'] and after['dispositions'] == before['dispositions']
+        chunk = reopened.get('/api/knowledge/chunks/'+after['target_chunk_id']).json()['record']
+        assert chunk['draft']['category'] == '人工确认的已有类' and chunk['vectorize_status'] == 'done'
+        hits = reopened.app.state.knowledge_runtime.service.search_faq('如何保养')
+        assert len(hits) == 1 and str(hits[0]['id']) == after['target_chunk_id']
+
+
+def test_seal_and_restart_release_slot_without_reviving_approval(api_env):
+    from retailq.app import create_app
+    from retailq.knowledge.review_contracts import DecisionCommand
+    env = api_env
+    rid, group = prepare(env)
+    command = DecisionCommand(request_key=key(),run_id=rid,group_id=group['group_id'],
+        expected_revision=group['revision'],decision='approve',category='不得复活')
+    admission = env.runtime.admit_review(command)
+    admission.lease.close()  # Accepted command, deliberately no business worker yet.
+    response = env.client.post(f'/api/knowledge/runs/{rid}/seal',
+        json={'request_key':key(),'confirm_run_id':rid},headers=HEADERS)
+    assert wait(env,response.json()['operation_id']).phase == 'sealed'
+    settings = env.runtime.settings
+    env.client.__exit__(None,None,None)
+    with TestClient(create_app(settings),base_url=ORIGIN,client=('127.0.0.1',50000)) as reopened:
+        assert reopened.get('/api/knowledge/summary').json()['current_run_id'] is None
+        assert reopened.get(f'/api/knowledge/operations/{command.request_key}').json()['phase'] == 'sealed'
+        assert reopened.app.state.knowledge_runtime.service.repository.all_chunks() == []
+        source = seed_closed_source(env.database,'重新开启的来源','另一份完整答案。')
+        response = reopened.post('/api/knowledge/runs',json={'request_key':key(),
+            'conversation_ids':[str(source.conversation_id)]},headers=HEADERS)
+        assert response.status_code == 202
+        assert reopened.portal.call(reopened.app.state.review_jobs.wait,response.json()['operation_id']).phase == 'succeeded'
+
+
+def test_queued_prepare_projects_before_worker_creates_run_file(api_env):
+    from retailq.knowledge.review_contracts import PrepareCommand
+    env = api_env
+    source = seed_closed_source(env.database)
+    command = PrepareCommand(request_key=key(),conversation_ids=(source.conversation_id,))
+    admission = env.runtime.admit_review(command)
+    try:
+        before = {p.relative_to(env.root):p.read_bytes() for p in env.root.rglob('*.json')}
+        summary = env.client.get('/api/knowledge/summary')
+        assert summary.status_code == 200, summary.text
+        assert summary.json()['current_run_id'] == command.request_key
+        detail = env.client.get('/api/knowledge/runs/'+command.request_key)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()['sources'][0]['conversation_id'] == str(source.conversation_id)
+        groups = env.client.get('/api/knowledge/runs/'+command.request_key+'/groups')
+        assert groups.status_code == 200 and groups.json()['items'] == []
+        assert before == {p.relative_to(env.root):p.read_bytes() for p in env.root.rglob('*.json')}
+    finally:
+        admission.lease.close()

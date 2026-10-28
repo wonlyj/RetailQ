@@ -4,7 +4,8 @@ const $ = view.byId;
 const initial = new URL(location.href);
 const initialRun = initial.searchParams.get('run');
 const state = { runId:/^[0-9a-f]{32}$/.test(initialRun || '') ? initialRun : null,
-  kind:initial.searchParams.get('legacy') === '1' ? 'legacy' : 'review', tab:'review', groupId:null,
+  kind:initial.searchParams.get('legacy') === '1' ? 'legacy' : 'review',
+  tab:initial.searchParams.get('legacy') === '1' ? 'knowledge' : 'review', groupId:null,
   run:null, detail:null, summary:null, ready:false, busy:false, uncertain:false, operationId:null,
   pending:null, reading:false, again:false, delay:5000, offset:0, runOffset:0, sourceOffset:0,
   selected:new Set(), drafts:new Map(), catalog:[], catalogTotal:0 };
@@ -123,7 +124,6 @@ async function refresh() {
       state.run = null; state.detail = null; $('runActions').hidden = true;
       view.legacy(await consoleRequest(`/legacy-runs/${state.runId}`),openChunk);
       $('runProgress').textContent = '旧版任务只读；缺失去向保持未知。';
-      setTab('knowledge',false);
     } else {
       state.run = null; state.detail = null; view.empty($('queue'),'尚无审核任务。选择历史对话，准备待审核知识。');
       view.group(null,null,openChunk); $('runActions').hidden = true;
@@ -161,7 +161,7 @@ async function write(path,data) {
   try {
     const operation = await consoleRequest(path,{method:'POST',body:{request_key:pending.key,...data}});
     state.operationId = operation.operation_id; state.uncertain = false;
-    if (path === '/runs') { state.runId = operation.run_id; state.kind = 'review'; state.groupId = null; state.offset = 0; $('queueFilter').value = 'pending'; setTab('review',false); }
+    if (path === '/runs') { state.tab = 'review'; $('queueFilter').value = 'pending'; selectRun(operation.run_id,'review'); }
     $('miningDialog').close(); $('sealDialog').close(); notify('请求已受理，正在读取实际处理状态。');
   } catch (error) {
     state.busy = false;
@@ -230,5 +230,6 @@ $('cancelSeal').addEventListener('click',() => $('sealDialog').close());
 $('confirmSeal').addEventListener('click',() => { if ($('sealAcknowledge').checked) write(`/runs/${state.runId}/seal`,{confirm_run_id:state.runId}); });
 document.addEventListener('visibilitychange',() => { clearTimeout(timer); if (!document.hidden) refresh(); });
 window.addEventListener('pagehide',() => { clearTimeout(timer); clearTimeout(debounceTimer); clearTimeout(categoryTimer); });
+setTab(state.tab,false);
 await refresh();
 if (state.ready) await categories().catch(error => notify(error.message,true));

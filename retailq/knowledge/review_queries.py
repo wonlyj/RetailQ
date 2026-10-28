@@ -50,6 +50,22 @@ class ReviewQueries:
     def categories(self, **kwargs):
         return self.repository.categories(**kwargs)
 
+    def _projected_run(self, run_id):
+        try:
+            return self.store.get_run(run_id)
+        except ServiceError as exc:
+            if exc.status_code != 404:
+                raise
+            # Admission persists its command before the worker creates run.json.
+            # The store's read-only catalog can project that frozen command;
+            # a physically incomplete directory still remains an AuditFault.
+            candidate = next((r for r in self.store.list_runs() if r.run_id == run_id),None)
+            if isinstance(candidate,AuditFault):
+                raise review_error(candidate.code,candidate.message) from None
+            if candidate is not None:
+                return candidate
+            raise
+
     def _run_summary(self, run, _attempt=0):
         sealed = self.store.get_seal(run.run_id)
         if isinstance(run, AuditFault):
@@ -79,7 +95,7 @@ class ReviewQueries:
         except ServiceError as exc:
             counters = None
             error = SafeFailure(code=exc.code, message=exc.public_message)
-        current = self.store.get_run(run.run_id)
+        current = self._projected_run(run.run_id)
         if current.revision != run.revision:
             if _attempt == 0:
                 return self._run_summary(current, _attempt=1)
@@ -122,7 +138,7 @@ class ReviewQueries:
                           completed_batches=len(run.completed_batches), total_batches=len(run.batches))
 
     def group(self, run_id, group_id):
-        run = self.store.get_run(run_id)
+        run = self._projected_run(run_id)
         if group_id not in run.group_ids:
             raise review_error('knowledge_review_not_found', '该任务没有此审核组。', 404)
         for attempt in range(2):
@@ -168,7 +184,7 @@ class ReviewQueries:
     def groups(self, run_id, *, query='', disposition='all', category='', offset=0, limit=20):
         if disposition not in ('all', 'new', 'merge', 'rejected', 'pending'):
             raise ValueError('invalid disposition filter')
-        run = self.store.get_run(run_id)
+        run = self._projected_run(run_id)
         items = []
         for gid in run.group_ids:
             detail = self.group(run_id, gid)

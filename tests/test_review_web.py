@@ -20,6 +20,10 @@ class Links(HTMLParser):
             self.targets.extend(value for name, value in attrs if name == 'href')
 
 
+def test_conversation_mining_schedule_is_opt_in():
+    assert Settings(_env_file=None).knowledge_schedule_enabled is False
+
+
 def test_console_page_and_navigation_exist(api_env):
     client = api_env.client
     page = client.get('/knowledge')

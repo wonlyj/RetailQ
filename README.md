@@ -1,6 +1,6 @@
 # RetailQ · 客服聊天工具链
 
-第3章正在验收：当前query_faq已接入BGE-M3与Milvus Lite。请先按[第3章手工验收清单](docs/ch03-manual-acceptance.md)执行建库、语义检索与恢复测试；真实云端验收和整体审查尚未完成。下文保留的第2章LIKE查询及“邮费漏召回”描述是历史基线，不代表当前实现。
+当前提供客服聊天、BGE-M3/Milvus Lite语义知识检索和[知识审核工作台](docs/ch03-knowledge-console.md)：可视化挖掘历史对话、人工选分类后发布、逐来源追踪chunk去向。页面入口 `/knowledge`。本地协议与存储测试已验证；新版分类Prompt、真实云端语义和业务验收仍待用户反馈。
 
 Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现有 SSE 聊天页接入 Function Calling：模型选择一个工具，执行、回灌结果，再生成真正的流式答复。保留第 1 章售后结构化提取。
 
@@ -9,10 +9,10 @@ Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现�
 | 工具 | 数据来源 |
 | --- | --- |
 | query_order / query_product / query_logistics | 工具内部随机生成的演示数据，不接真实电商或物流接口，不建对应表 |
-| query_faq | MySQL faq 表的字面关键词 LIKE 查询 |
+| query_faq | 开启知识功能时：BGE-M3 dense单路检索Milvus，MySQL知识原文确证；工具入出参不变。知识关闭时保留第2章faq表LIKE基线 |
 | create_ticket | 写入 tickets，关联当前会话并更新为已转人工；不表示即时接通人工或完成退款 |
 
-每次用户消息最多执行一个业务工具；没有 Agent Loop、向量检索或 RAG。第一次模型请求绑定工具；第二次请求不提供工具，逐上游文本增量转发。工具参数由 Pydantic 严格校验；读工具超时/临时连接错误最多重试一次，工单写入不自动重试。写入超时只能说明结果未确认，成功工单及回执会保留。
+每次用户消息最多执行一个业务工具，没有Agent Loop。知识检索只跑dense单路，不加关键词召回、混合检索或重排。第一次模型请求绑定工具；第二次请求不提供工具，逐上游文本增量转发。工具参数由Pydantic严格校验；读工具超时/临时连接错误最多重试一次，工单写入不自动重试。写入超时只能说明结果未确认，成功工单及回执会保留。
 
 本项目面向本机演示，监听 127.0.0.1、单 Uvicorn worker。浏览器 user_id 是本地演示身份，不是登录鉴权；不能作为公网生产系统直接部署。
 
@@ -68,7 +68,9 @@ docker compose -p retailq -f compose.yaml up -d --wait mysql
 
 1. `订单 1001 的物流到哪了`：气泡显示 query_logistics 徽章，按演示物流结果回答。
 2. `退货政策是什么`：query_faq 命中演示退货规则。
-3. `邮费是多少`：query_faq 保留“邮费”原词，查无结果并说明未查到。这是本章刻意保留的关键词漏召回；种子里“运费”能查到，“邮费”没有同义词扩展。
+3. `邮费是多少`：开启知识功能、完成运费知识向量化后，应语义召回运费演示规则并保留例外条件。第2章LIKE基线曾漏召回“邮费”，历史报告仍保留该时期结果。
+
+知识启动配置、浏览器审核演示、分类评估和真实kill恢复命令见[工作台指南](docs/ch03-knowledge-console.md)；文档建库与真实BGE验收见[第3章清单](docs/ch03-manual-acceptance.md)。默认关闭定时挖掘；网页、CLI和显式启用的scheduler都只准备待审核知识，通过后才发布。
 
 还可查询商品编号 2001、订单 001001，或说明配送问题后明确要求创建投诉工单。气泡显示工具执行中/完成/失败；停止或刷新不会撤销已提交的工单。支持新建/切换对话、复制、停止和移动端侧栏。
 
@@ -121,7 +123,11 @@ smoke 自动核对三项核心工具选择、数据库结果和流完成情况�
 
 ## 代码与过程记录
 
-API → ChatService → ToolRegistry / ModelGateway → ChatRepository → SQLAlchemy；会话及消息短事务，不在模型等待期间占用数据库连接。四表为 faq、conversations、messages、tickets；工单与会话状态和成功 tool 回执同事务。
+API → ChatService → ToolRegistry / ModelGateway → ChatRepository → SQLAlchemy；会话及消息短事务，不在模型等待期间占用数据库连接。原四表faq、conversations、messages、tickets之外，第3章使用用户DDL的knowledge_chunks、qa_extraction_staging，审核记录存在本地知识目录，不新增SQL表/列。工单与会话状态和成功tool回执同事务。
+
+- 第3章设计/计划：docs/superpowers/specs/2026-10-27-ch03-knowledge-console-design.md、docs/superpowers/plans/2026-10-27-ch03-knowledge-console.md
+- 第3章开发记录：dev-notes/ch03.md；新版真实分类/审核链路仍需用户按指南反馈。
+- 以下第2章设计、评估、审查为历史证据，不代表新版知识链路真实验收：
 
 - 设计：docs/superpowers/specs/2026-10-24-ch02-function-calling-design.md
 - 计划：docs/superpowers/plans/2026-10-24-ch02-function-calling.md

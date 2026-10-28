@@ -28,7 +28,7 @@ def validate_console_scope(settings, output):
     return output
 
 
-def create_fixture_app(settings, output, *, delay=0.0):
+def create_fixture_app(settings, output, *, delay=0.0, scenario='normal', batch_size=20):
     import retailq.app as app_module
     import retailq.knowledge.runtime as runtime_module
     from langchain_core.messages import AIMessage, ToolMessage
@@ -93,7 +93,10 @@ def create_fixture_app(settings, output, *, delay=0.0):
     @asynccontextmanager
     async def seeded(app):
         async with original(app):
-            manifest = await asyncio.to_thread(seed_fixture,app.state.knowledge_runtime)
+            if app.state.knowledge_runtime is not None:
+                app.state.knowledge_runtime._preparer.max_conversations = batch_size
+            manifest = (await asyncio.to_thread(seed_fixture,app.state.knowledge_runtime,scenario=scenario)
+                        if scenario != 'unready' else {'scenario':'unready'})
             (output / 'fixture-manifest.json').write_text(json.dumps({
                 'embedding_mode':'deterministic-test','chat_mode':'fixture',**manifest},ensure_ascii=False,indent=2),encoding='utf-8')
             yield
@@ -101,7 +104,7 @@ def create_fixture_app(settings, output, *, delay=0.0):
     return application
 
 
-def seed_fixture(runtime):
+def seed_fixture(runtime, *, scenario='normal'):
     from sqlalchemy import update
     from retailq.models import Conversation
     from retailq.knowledge.models import KnowledgeChunk
@@ -116,6 +119,8 @@ def seed_fixture(runtime):
             session.add(KnowledgeChunk(id=9007199254740993, category='验收专用', questions='大ID知识的原始问题',
                                        answer=BIG_ANSWER,content_type='faq',vectorize_status='pending'))
         runtime.service.vectorize_pending()
+        if scenario == 'empty':
+            return {'sources':{},'initial_chunks':3,'scenario':'empty'}
         cases = [
             ('new-ebook','纸质说明书丢了，在哪里看电子说明书？',EBOOK),
             ('new-alias','没有纸质说明书还能在哪里查看',EBOOK),
@@ -133,8 +138,16 @@ def seed_fixture(runtime):
         with database.sessions.begin() as session:
             session.execute(update(Conversation).where(Conversation.id == ongoing.conversation_id).values(status='进行中'))
         sources['ineligible'] = str(ongoing.conversation_id)
+        from dataclasses import asdict
+        legacy_source = seed_closed_source(database,'旧版新增知识去哪了？','演示：旧记录没有持久化新增ID。')
+        legacy_id = 'f'*32
+        legacy_root = runtime.root / 'runs'
+        legacy_root.mkdir(exist_ok=True)
+        (legacy_root / f'run-{legacy_id}.json').write_text(json.dumps({'run_id':legacy_id,'phase':'completed',
+            'sources':[asdict(legacy_source)],'dedup_groups':[{'member_ids':[1],
+            'representative_id':1,'target_chunk_id':None,'questions':['旧版新增知识去哪了？']}]},ensure_ascii=False),encoding='utf-8')
         return {'sources':sources,'initial_chunks':len(runtime.service.repository.all_chunks()),
-                'bigint_target':'9007199254740993'}
+                'bigint_target':'9007199254740993','legacy_run_id':legacy_id}
     finally:
         lease.close()
 
@@ -145,21 +158,29 @@ def main(argv=None):
     parser.add_argument('--output',required=True)
     parser.add_argument('--port',type=int,default=8765)
     parser.add_argument('--model-delay',type=float,default=0.0)
+    parser.add_argument('--scenario',choices=['normal','empty','unready'],default='normal')
+    parser.add_argument('--batch-size',type=int,default=20)
     args = parser.parse_args(argv)
-    if not 1024 <= args.port <= 65535 or not 0 <= args.model_delay <= 10:
+    if not 1024 <= args.port <= 65535 or not 0 <= args.model_delay <= 10 or not 1 <= args.batch_size <= 20:
         parser.error('port must be 1024–65535; model delay must be 0–10 seconds')
     local = Settings()
     settings = Settings(_env_file=None,mysql_host='127.0.0.1',mysql_port=3307,mysql_database='retailq_test',
-        mysql_user=local.mysql_user,mysql_password=local.mysql_password,knowledge_enabled=True,
+        mysql_user=local.mysql_user,mysql_password=local.mysql_password,knowledge_enabled=args.scenario != 'unready',
         knowledge_schedule_enabled=False,knowledge_data_dir=str(Path(args.output).resolve() / 'knowledge'),
         knowledge_tokenizer_path=str(ROOT / 'artifacts/knowledge/assets/tokenizer.json'),embedding_api_key='fixture',
         openai_base_url='http://fixture.invalid/v1',openai_api_key='fixture',openai_model='deterministic-test',context_window_tokens=31536)
     output = validate_console_scope(settings,args.output)
     from tests.support.database import reset_isolated_database
     database = reset_isolated_database(settings)
+    # Dedicated browser fixture also exercises the unchanged chat page, whose
+    # legacy numeric IDs require safe integers. Prior BIGINT source tests may
+    # leave MySQL's counter high even after DELETE. This touches only the
+    # scope-guarded, disposable test database after its normal seed reset.
+    with database.engine.begin() as connection:
+        connection.exec_driver_sql('ALTER TABLE conversations AUTO_INCREMENT = 2')
     database.close()
     output.mkdir(parents=True)
-    application = create_fixture_app(settings,output,delay=args.model_delay)
+    application = create_fixture_app(settings,output,delay=args.model_delay,scenario=args.scenario,batch_size=args.batch_size)
     print(f'ISOLATED FIXTURE: deterministic models; MySQL 3307/retailq_test; http://127.0.0.1:{args.port}/knowledge',flush=True)
     import uvicorn
     server = uvicorn.Server(uvicorn.Config(application,host='127.0.0.1',port=args.port,

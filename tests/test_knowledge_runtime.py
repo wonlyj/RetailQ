@@ -38,7 +38,7 @@ async def test_late_start_runs_once_without_replaying_missed_days(tmp_path):
     calls=[]
     class Runtime:
         root=tmp_path
-        settings=Settings(_env_file=None,knowledge_enabled=True)
+        settings=Settings(_env_file=None,knowledge_enabled=True,knowledge_schedule_enabled=True)
         def maintain(self,action,options,stop):calls.append(action);return {'complete':True,'pending':0}
     clock=lambda:datetime(2026,10,25,5,tzinfo=timezone.utc)
     scheduler=DailyKnowledgeScheduler(Runtime(),clock=clock)
@@ -86,7 +86,7 @@ async def test_cancelling_scheduler_waits_for_worker_before_close(tmp_path):
     entered=threading.Event();done=threading.Event()
     class Runtime:
         root=tmp_path
-        settings=Settings(_env_file=None,knowledge_enabled=True)
+        settings=Settings(_env_file=None,knowledge_enabled=True,knowledge_schedule_enabled=True)
         def maintain(self,action,options,stop):
             entered.set();stop.wait(3);done.set();return {'complete':False}
     scheduler=DailyKnowledgeScheduler(Runtime(),clock=lambda:datetime(2026,10,25,5,tzinfo=timezone.utc))

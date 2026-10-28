@@ -34,7 +34,7 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = Field(default=10,gt=0,le=120)
     embedding_retries: int = Field(default=1,ge=0,le=1)
     knowledge_enabled: bool = False
-    knowledge_schedule_enabled: bool = True
+    knowledge_schedule_enabled: bool = False
     knowledge_data_dir: str = 'artifacts/knowledge'
     knowledge_top_k: int = Field(default=3,ge=1,le=20)
     knowledge_min_score: float = Field(default=0.0,ge=-1,le=1)

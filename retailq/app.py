@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from retailq.api.chat import router as chat_router
+from retailq.api.knowledge import router as knowledge_router
 from retailq.db import Database
 from retailq.repositories import ChatRepository
 from retailq.services.chat import ChatService
@@ -79,6 +80,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application = FastAPI(title="RetailQ", version="0.3.0", lifespan=lifespan)
     application.state.settings = settings
     application.include_router(chat_router)
+    application.include_router(knowledge_router)
     web_directory = Path(__file__).parent / "web"
     application.mount("/assets", StaticFiles(directory=web_directory), name="chat-assets")
 

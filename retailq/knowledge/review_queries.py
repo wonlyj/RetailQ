@@ -11,7 +11,9 @@ from retailq.knowledge.models import QAStaging
 from retailq.knowledge.review_contracts import (
     AuditFault, ChunkDetail, ConsoleSummary, GroupDetail, GroupSummary, LegacyRunDetail, LegacyTarget,
     OperationView, RunCounters, RunDetail, RunSummary, SafeFailure,
+    evolve,
 )
+from retailq.knowledge.review_preparation import processed_sources
 from retailq.knowledge.review_repository import paginate
 from retailq.knowledge.review_store import review_error
 from retailq.knowledge.text import normalize_text
@@ -23,8 +25,24 @@ class ReviewQueries:
         self.repository, self.knowledge, self.store = repository, knowledge, store
         self.legacy_root = Path(legacy_root).resolve()
 
-    def sources(self, **kwargs):
-        return self.repository.list_sources(**kwargs)
+    def sources(self, *, query='', eligibility='all', offset=0, limit=20):
+        if eligibility not in ('all','eligible','ineligible'):
+            raise ValueError('invalid eligibility filter')
+        processed=processed_sources(self.store)
+        items=[]
+        position=0
+        while True:
+            page=self.repository.list_sources(query=query,offset=position,limit=100)
+            for source in page.items:
+                ref=f'conversation:{source.id}:message:{source.max_message_id}'
+                if source.eligibility and ref in processed:
+                    source=evolve(source,eligibility=False,reason='该版本来源已完整处理。')
+                if eligibility=='all' or source.eligibility==(eligibility=='eligible'):
+                    items.append(source)
+            position+=len(page.items)
+            if position>=page.total:
+                break
+        return paginate(items,offset,limit)
 
     def source(self, cid):
         return self.repository.source_detail(cid)

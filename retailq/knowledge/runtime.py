@@ -303,6 +303,17 @@ class KnowledgeRuntime:
                 return existing
             if self._review_closing or self._closing:
                 raise ServiceError('knowledge_closing',503,'知识服务正在关闭。')
+            marker=self.review_store.get_seal(command.run_id)
+            if marker is not None:
+                try:
+                    original=self.review_store.get_operation(marker.operation_id)
+                    reused=original.operation_id if original.kind=='seal' and not original.reused_operation_id else None
+                except ServiceError:
+                    reused=None  # The valid seal marker is the terminal authority.
+                record=OperationRecord(operation_id=command.request_key,run_id=command.run_id,kind='seal',command=command,
+                    request_hash=canonical_request_hash(command),accepted_at=self.review_store.timestamp(),
+                    phase='sealed',reused_operation_id=reused)
+                return self.review_store.put_operation(record,expected_revision=None)
             # Read failure is acceptable only when a physical run/prepare command
             # exists: sealing preserves its bytes and never needs model access.
             path=self.review_store._path('runs',self.review_store._id(command.run_id))

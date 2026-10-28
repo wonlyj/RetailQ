@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f5f8f5"><title>RetailQ · 知识审核工作台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/assets/knowledge.css">
+  <script type="module" src="/assets/knowledge.js"></script>
+</head>
+<body>
+<div class="knowledge-app">
+  <aside class="side">
+    <a class="brand" href="/"><span class="brand-mark">Q</span><span>Retail<span class="green">Q</span><small>知识运营与服务</small></span></a>
+    <nav aria-label="工作空间"><small class="nav-label">工作空间</small><a href="/">◌　返回客服</a><a class="active" href="/knowledge" aria-current="page">▤　知识工作台</a></nav>
+    <div class="scope"><small class="nav-label">工作方式</small><p>选择历史对话<br>人工审核与分类<br>追踪来源与去向</p></div>
+    <div class="side-note"><b>● 本机知识空间</b><p>审核确认后才能用于检索。<br>原会话与已发布知识保留。</p></div>
+  </aside>
+  <main class="workspace">
+    <header class="header"><div><div class="eyebrow">RETAILQ / KNOWLEDGE OPERATIONS</div><h1>知识审核工作台</h1></div><div class="header-actions"><a class="mobile-back" href="/">返回客服</a><span class="badge" id="consoleStatus">连接中</span><button class="primary" id="startMining" disabled>＋ 开始挖掘</button></div></header>
+    <div class="content">
+      <p class="notice">先审核，再入库。分类建议供参考；未审核的新知识不会进入客服检索。</p>
+      <div class="message" id="globalMessage" role="status" aria-live="polite" hidden></div>
+      <section class="stats" aria-label="实际知识统计">
+        <div class="stat"><small>本次抽取问答</small><strong id="extractedCount">—</strong><span>所选任务的实际暂存记录</span></div>
+        <div class="stat"><small>等待人工审核</small><strong id="pendingCount">—</strong><span>以去重组为单位确认</span></div>
+        <div class="stat"><small>本次确认入库</small><strong id="appliedCount">—</strong><span>已确证的新增与归并</span></div>
+        <div class="stat"><small>知识库中的 chunk</small><strong id="chunkCount">—</strong><span>实际原文记录数</span></div>
+      </section>
+      <div class="task-picker"><label for="runSelect">当前查看</label><select id="runSelect"><option value="">尚无任务</option></select><button class="secondary" id="refreshButton">刷新</button><span id="runProgress"></span></div>
+      <nav class="tabs" aria-label="工作台视图"><button class="tab active" data-tab="review" aria-selected="true">待审核</button><button class="tab" data-tab="knowledge" aria-selected="false">知识去向</button><button class="tab" data-tab="runs" aria-selected="false">任务记录</button></nav>
+      <div class="filters" id="groupFilters"><input id="searchInput" type="search" placeholder="搜索问题或来源…" aria-label="搜索问题或来源"><select id="queueFilter" aria-label="处理类型"><option value="pending">待审核</option><option value="all">全部去向</option><option value="new">新增候选</option><option value="merge">归并候选</option><option value="rejected">人工拒绝</option></select><input id="categoryFilter" placeholder="按最终或建议分类筛选" aria-label="按分类筛选"></div>
+      <section id="reviewView" class="panes">
+        <div>
+          <section class="panel"><div class="panel-head"><h2>待审核问答</h2><small>核对完整问答，再选择处理方式</small></div><div id="queue" class="queue"><p class="empty">正在读取…</p></div><div class="pager"><button id="queuePrev" class="secondary" disabled>上一页</button><span id="queuePage"></span><button id="queueNext" class="secondary" disabled>下一页</button></div></section>
+          <section class="panel detail-wrap"><div class="panel-head"><h2>审核与分类</h2><span class="badge" id="reviewStatus">未选择</span></div><div class="detail-body">
+            <div id="groupEmpty" class="empty">选择一个审核组，查看完整问答、来源与去向。</div>
+            <div id="groupContent" hidden>
+              <label class="field-label">全部真实问法</label><div id="questionList" class="question-list"></div>
+              <label class="field-label">完整答案</label><pre id="answerText" class="answer"></pre>
+              <div class="suggestion" id="suggestion"></div>
+              <div id="categoryEditor"><div class="category-row"><label><span class="field-label">选择已有 category</span><input type="search" id="categoryQuery" placeholder="搜索已有分类" aria-label="搜索已有分类"><select id="categorySelect" aria-label="选择已有分类"><option value="">请选择已有分类</option></select><span id="categoryCatalogInfo" class="field-help"></span></label><label><span class="field-label">或确认一个新分类</span><input id="newCategory" maxlength="255" placeholder="输入最终分类" aria-label="新分类"><span class="field-help">选择或填写后，只有通过审核才会生效。</span></label></div><p class="final-category" id="finalCategory"></p></div>
+              <div id="mergeCategory" class="category-note" hidden></div>
+              <label id="rejectReasonLabel"><span class="field-label">拒绝原因（可选）</span><textarea id="rejectReason" maxlength="512" rows="2" placeholder="说明为什么不适合入库"></textarea></label>
+              <div class="actions"><small id="actionHelp"></small><button class="reject" id="rejectButton" disabled>拒绝入库</button><button class="primary" id="approveButton" disabled>通过并入库</button></div>
+            </div>
+          </div></section>
+        </div>
+        <aside class="right"><section class="panel"><div class="panel-head"><h2>这条知识去了哪里</h2><small>来源 → 处理 → 目标</small></div><div class="trace" id="trace"><p class="empty">尚未选择审核组</p></div></section><section class="panel"><div class="panel-head"><h2>来源对话</h2><small>本次冻结的原始消息</small></div><div class="source-panels" id="sourcePanels"></div></section></aside>
+      </section>
+      <section id="knowledgeView" class="panel" hidden><div class="panel-head"><h2>知识去向记录</h2><small>逐来源区分新增、同组归并与拒绝</small></div><div id="destinations" class="table-wrap"></div><div class="pager"><button id="destPrev" class="secondary">上一页</button><span id="destPage"></span><button id="destNext" class="secondary">下一页</button></div></section>
+      <section id="runsView" class="panel" hidden><div class="panel-head"><h2>任务记录</h2><small>只显示实际阶段与计数</small></div><div id="runHistory" class="table-wrap"></div><div class="pager"><button id="runsPrev" class="secondary">上一页</button><span id="runsPage"></span><button id="runsNext" class="secondary">下一页</button></div></section>
+      <section class="run-actions" id="runActions" hidden><p id="runState"></p><div><button class="secondary" id="resumeRun">继续任务</button><button class="secondary" id="retryVectors">补齐已批准知识的向量</button><button class="reject" id="sealRun">终止并封存</button></div></section>
+      <p class="footnote">审核按组处理；归并沿用已有知识。检索状态来自入库记录，当前页面不执行索引实时核验。示例规则不代表实际平台政策。</p>
+    </div>
+  </main>
+</div>
+<dialog id="miningDialog"><div class="dialog-head"><h2>选择历史对话，开始挖掘</h2><button id="closeMining" class="secondary">关闭</button></div><p>仅可选择已结束且有完整答复的会话，一次最多 100 个。准备完成后进入待审核。</p><div id="miningMessage" class="message" role="status" hidden></div><div class="filters"><input id="sourceSearch" type="search" placeholder="搜索会话 ID 或内容" aria-label="搜索历史对话"><select id="sourceEligibility" aria-label="来源资格"><option value="all">全部会话</option><option value="eligible">可参与挖掘</option><option value="ineligible">不可选择</option></select></div><div id="sourceOptions"></div><div class="pager"><button id="sourcesPrev" class="secondary">上一页</button><span id="sourcesPage"></span><button id="sourcesNext" class="secondary">下一页</button></div><div class="modal-actions"><span id="selectionCount">已选 0 / 100</span><button id="submitMining" class="primary" disabled>准备待审核知识</button></div></dialog>
+<dialog id="chunkDialog"><div class="dialog-head"><h2 id="chunkTitle">知识原文</h2><button id="closeChunk" class="secondary">关闭</button></div><div id="chunkBody"></div></dialog>
+<dialog id="sealDialog"><h2>终止并封存任务</h2><p>已提交的知识、向量和现存审计记录都会保留。未应用的决定及未审核组停止执行；此任务不能再继续。已落原文但待向量化的知识仍会保留。</p><div id="sealMessage" class="message" role="status" hidden></div><p>任务：<code id="sealRunId"></code></p><label class="source-option"><input id="sealAcknowledge" type="checkbox"><span>我理解以上影响，确认终止并封存。</span></label><div class="modal-actions"><button id="cancelSeal" class="secondary">返回任务</button><button id="confirmSeal" class="reject" disabled>确认终止并封存</button></div></dialog>
+</body></html>

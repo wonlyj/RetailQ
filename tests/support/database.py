@@ -12,12 +12,13 @@ def chat_settings(url, **kwargs):
                         mysql_user=local.mysql_user,mysql_password=local.mysql_password,**kwargs)
 
 
-@pytest.fixture
-def test_database():
+def reset_isolated_database(settings):
     from retailq.db import Database
+    from retailq.errors import ServiceError
     from sqlalchemy import text
-    settings = Settings(mysql_port=3307, mysql_database="retailq_test")
-    assert settings.mysql_port == 3307 and settings.mysql_database == 'retailq_test'
+    if (settings.mysql_port != 3307 or settings.mysql_database != 'retailq_test'
+            or settings.mysql_host not in ('127.0.0.1','localhost','::1')):
+        raise ServiceError('knowledge_scope_invalid',409,'仅允许重置本机3307/retailq_test隔离测试库。')
     database = Database(settings)
     try:
         database.ping()
@@ -42,6 +43,12 @@ def test_database():
         for statement in Path('db/init/02-seed.sql').read_text(encoding='utf-8').split(';'):
             if statement.strip():
                 session.connection().exec_driver_sql(statement)
+    return database
+
+
+@pytest.fixture
+def test_database():
+    database = reset_isolated_database(Settings(mysql_port=3307, mysql_database='retailq_test'))
     try:
         yield database
     finally:

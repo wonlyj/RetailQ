@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from retailq.api.chat import router as chat_router
 from retailq.api.knowledge import router as knowledge_router
+from retailq.api.knowledge_access import require_console_local
 from retailq.db import Database
 from retailq.repositories import ChatRepository
 from retailq.services.chat import ChatService
@@ -87,6 +88,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @application.get("/", response_class=FileResponse, include_in_schema=False)
     async def chat_page():
         return FileResponse(web_directory / "index.html", headers={"Cache-Control": "no-cache"})
+
+    @application.get('/knowledge', response_class=FileResponse, include_in_schema=False)
+    async def knowledge_page(request: Request):
+        require_console_local(request)
+        return FileResponse(web_directory / 'knowledge.html', headers={'Cache-Control':'no-cache'})
 
     @application.exception_handler(ServiceError)
     async def service_error_handler(request: Request, exc: ServiceError):

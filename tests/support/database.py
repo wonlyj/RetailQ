@@ -34,7 +34,14 @@ def reset_isolated_database(settings):
             match = re.search(r'CREATE TABLE (\w+)', statement)
             if statement.strip() and (not match or not inspect(connection).has_table(match[1])):
                 connection.exec_driver_sql(statement)
+    if not all(inspect(database.engine).has_table(name) for name in ('low_confidence_questions', 'faith_cases')):
+        from scripts.migrate_rag import migrate_rag
+        migrate_rag(database, Path('db/init/04-rag.sql'))
     with database.sessions.begin() as session:
+        inspector = inspect(session.connection())
+        for name in ('low_confidence_questions', 'faith_cases'):
+            if inspector.has_table(name):
+                session.execute(text(f'DELETE FROM {name}'))
         session.execute(text('UPDATE knowledge_chunks SET prev_chunk_id=NULL, next_chunk_id=NULL'))
         for name in ('qa_extraction_staging', 'knowledge_chunks'):
             session.execute(text(f'DELETE FROM {name}'))

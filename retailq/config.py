@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     embedding_timeout_seconds: float = Field(default=10,gt=0,le=120)
     embedding_retries: int = Field(default=1,ge=0,le=1)
     knowledge_enabled: bool = False
+    milvus_uri: str = 'http://127.0.0.1:19530'
+    milvus_collection_prefix: str = 'knowledge'
+    knowledge_query_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    rerank_base_url: str = 'https://api.siliconflow.cn/v1'
+    rerank_api_key: SecretStr = Field(default=SecretStr(''), repr=False)
+    rerank_proxy: SecretStr = Field(default=SecretStr(''), repr=False)
+    rerank_model: Literal['BAAI/bge-reranker-v2-m3'] = 'BAAI/bge-reranker-v2-m3'
+    rerank_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    rag_confidence_path: str = 'artifacts/knowledge/rag-confidence.json'
     knowledge_schedule_enabled: bool = False
     knowledge_data_dir: str = 'artifacts/knowledge'
     knowledge_top_k: int = Field(default=3,ge=1,le=20)
@@ -62,7 +71,18 @@ class Settings(BaseSettings):
                 raise ValueError("base URL must not contain credentials, query or fragment")
         return value
 
-    @field_validator('embedding_proxy')
+    @field_validator('milvus_uri', 'rerank_base_url')
+    @classmethod
+    def check_rag_url(cls, value: str) -> str:
+        value = value.strip()
+        parsed = urlsplit(value)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            raise ValueError('URL must use HTTP(S) and include a host')
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError('URL must not contain credentials, query or fragment')
+        return value
+
+    @field_validator('embedding_proxy', 'rerank_proxy')
     @classmethod
     def check_embedding_proxy(cls,value: SecretStr) -> SecretStr:
         raw=value.get_secret_value().strip()

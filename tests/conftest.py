@@ -1,7 +1,9 @@
 import pytest
 import retailq.knowledge.models  # Load all six mappings even in isolated tests.
+import retailq.knowledge.rag_models  # Register chapter-four mappings for schema checks.
 
 from tests.support.database import test_database
+from tests.support.milvus import standalone_store_settings
 
 
 @pytest.fixture
@@ -22,5 +24,8 @@ def clean_environment(monkeypatch):
         "KNOWLEDGE_DATA_DIR", "KNOWLEDGE_TOKENIZER_PATH", "KNOWLEDGE_TOP_K", "KNOWLEDGE_MIN_SCORE",
         "KNOWLEDGE_CHUNK_TARGET", "KNOWLEDGE_CHUNK_OVERLAP", "KNOWLEDGE_SCHEDULE_HOUR", "KNOWLEDGE_SCHEDULE_MINUTE",
         "KNOWLEDGE_TIMEZONE", "KNOWLEDGE_DEDUP_MIN_SCORE", "KNOWLEDGE_DEDUP_CANDIDATE_K",
+        "MILVUS_URI", "MILVUS_COLLECTION_PREFIX", "KNOWLEDGE_QUERY_TIMEOUT_SECONDS",
+        "RERANK_BASE_URL", "RERANK_API_KEY", "RERANK_PROXY", "RERANK_MODEL",
+        "RERANK_TIMEOUT_SECONDS", "RAG_CONFIDENCE_PATH",
     ):
         monkeypatch.delenv(key, raising=False)

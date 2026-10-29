@@ -22,6 +22,19 @@ class KnowledgeRepository:
         self.database = database
 
     @database_errors
+    def migrate_known_shipping_faq(self) -> None:
+        """Update only the exact chapter-two demonstration seed."""
+        old = '演示规则：普通配送订单满99元免运费，不满99元收取8元运费；偏远地区及特殊商品以平台结算页为准。'
+        new = old.replace('收取8元', '收取10元')
+        with self.database.sessions.begin() as session:
+            row = session.scalar(select(FAQ).where(FAQ.id == 2).with_for_update())
+            if row is None:
+                return
+            if row.question != '运费标准是什么' or row.category != '配送' or row.answer not in (old, new):
+                raise ServiceError('knowledge_source_conflict', 409, '已有配送FAQ与演示种子不同，请核查后再构建。')
+            row.answer = new
+
+    @database_errors
     def import_chunks(self,drafts: list[ChunkDraft]) -> list[int]:
         if not drafts:
             return []
@@ -37,6 +50,10 @@ class KnowledgeRepository:
                     chain.append(current)
                     current = by_id.get(current.next_chunk_id)
                 if [r.draft for r in chain] == drafts and current is None:
+                    if any(row.prev_chunk_id != (chain[i-1].id if i else None) or
+                           row.next_chunk_id != (chain[i+1].id if i+1 < len(chain) else None)
+                           for i, row in enumerate(chain)):
+                        raise ServiceError('knowledge_chain_conflict',409,'知识块链接不一致，请核查导入来源。')
                     return [r.id for r in chain]
             # Matching complete payload but attached to another chain is unsafe.
             if any(r.draft in drafts for r in by_id.values()):

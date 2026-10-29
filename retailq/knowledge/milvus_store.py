@@ -25,6 +25,15 @@ class MilvusKnowledgeStore:
     def close(self):
         self.client.close()
 
+    def exists(self):
+        return self.client.has_collection(self.collection)
+
+    def count(self):
+        rows = self.client.query(self.collection, filter='id >= 0', output_fields=['count(*)'], consistency_level='Strong')
+        if len(rows) != 1 or type(rows[0].get('count(*)')) is not int:
+            raise _error()
+        return rows[0]['count(*)']
+
     def ensure_collection(self):
         if not self.client.has_collection(self.collection):
             schema = self.client.create_schema(auto_id=False, enable_dynamic_field=False, description='retailq:' + self.identity)

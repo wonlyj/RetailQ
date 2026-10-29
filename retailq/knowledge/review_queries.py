@@ -21,9 +21,10 @@ from retailq.repositories import database_errors
 
 
 class ReviewQueries:
-    def __init__(self, repository, knowledge, store, legacy_root: Path):
+    def __init__(self, repository, knowledge, store, legacy_root: Path, *, corpus=None):
         self.repository, self.knowledge, self.store = repository, knowledge, store
         self.legacy_root = Path(legacy_root).resolve()
+        self.corpus = corpus
 
     def sources(self, *, query='', eligibility='all', offset=0, limit=20):
         if eligibility not in ('all','eligible','ineligible'):
@@ -169,7 +170,12 @@ class ReviewQueries:
                 target = app.prepared.chunk_id
                 confirmed = target is not None
                 if target is not None:
-                    vector_status = self.knowledge.get_chunks([target])[target].vectorize_status
+                    row = self.knowledge.get_chunks([target])[target]
+                    vector_status = row.vectorize_status
+                    if self.corpus is not None:
+                        from retailq.knowledge.corpus import is_active
+                        if not is_active(row, self.corpus.active()):
+                            vector_status = 'pending'
             else:
                 error = SafeFailure(code='knowledge_review_conflict', message='当前原文或暂存状态与审核确证不一致。')
         summary = GroupSummary(group_id=group_id, revision=group.revision, question='\n'.join(group.questions),

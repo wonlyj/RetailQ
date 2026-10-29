@@ -34,11 +34,20 @@ def complete_excerpt(answer: str,maximum: int=1200) -> str:
 
 
 class KnowledgeService:
-    def __init__(self,repository: KnowledgeRepository,embedding: EmbeddingProvider,vectors: MilvusKnowledgeStore,budget: BGETokenBudget,*,top_k: int=3,min_score: float=0.0,batch_size: int=16,query_timeout_seconds: float=5.0,chunk_target_chars: int=600,chunk_overlap_chars: int=100):
+    def __init__(self,repository: KnowledgeRepository,embedding: EmbeddingProvider,vectors: MilvusKnowledgeStore,budget: BGETokenBudget,*,top_k: int=3,min_score: float=0.0,batch_size: int=16,query_timeout_seconds: float=5.0,chunk_target_chars: int=600,chunk_overlap_chars: int=100,retrieval_engine=None,normalizer=None,corpus=None,index_builder=None):
         self.repository,self.embedding,self.vectors,self.budget=repository,embedding,vectors,budget
         self.top_k,self.min_score,self.batch_size=top_k,min_score,batch_size
         self.query_timeout_seconds=query_timeout_seconds
         self.chunk_target_chars,self.chunk_overlap_chars=chunk_target_chars,chunk_overlap_chars
+        self.retrieval_engine,self.normalizer,self.corpus,self.index_builder=retrieval_engine,normalizer,corpus,index_builder
+
+    def retrieve(self, question, *, strategy='hybrid_rerank', filters=None, deadline=None):
+        if self.retrieval_engine is None or self.normalizer is None or self.corpus is None:
+            raise ServiceError('knowledge_retrieval_unavailable', 503, '新知识检索尚未配置。')
+        end=deadline if deadline is not None else time.monotonic()+self.query_timeout_seconds
+        snapshot=self.corpus.active()
+        understood=self.normalizer.understand(question,deadline=end)
+        return self.retrieval_engine.retrieve(understood,snapshot,strategy,filters,deadline=end)
 
     def import_documents(self,documents: list[SourceDocument]) -> list[int]:
         result=[]
@@ -47,6 +56,8 @@ class KnowledgeService:
         return result
 
     def import_faq(self) -> list[int]:
+        if self.corpus is not None:
+            raise ServiceError('knowledge_corpus_invalid',409,'活动语料使用版本化导入，请先核查来源。')
         result=[]
         for draft in self.repository.faq_drafts():
             self.budget.validate(embedding_text(draft))
@@ -55,9 +66,27 @@ class KnowledgeService:
 
     def status(self) -> dict[str,int]:
         rows=self.repository.all_chunks()
-        return {'chunks':len(rows),'pending':sum(r.vectorize_status=='pending' for r in rows),'done':sum(r.vectorize_status=='done' for r in rows)}
+        result={'chunks':len(rows),'pending':sum(r.vectorize_status=='pending' for r in rows),'done':sum(r.vectorize_status=='done' for r in rows)}
+        if self.corpus is not None:
+            from retailq.knowledge.corpus import is_active
+            snapshot=self.corpus.active()
+            result.update(active=sum(is_active(row,snapshot) for row in rows),
+                          history=sum(not is_active(row,snapshot) for row in rows),
+                          active_pending=sum(is_active(row,snapshot) and row.vectorize_status != 'done' for row in rows))
+        return result
 
     def vectorize_pending(self,*,stop: threading.Event | None=None,fault: Callable[[str],None] | None=None,only_ids: tuple[int,...] | None=None) -> VectorizeReport:
+        snapshot=None
+        if self.corpus is not None:
+            from retailq.knowledge.corpus import is_active
+            snapshot=self.corpus.active()
+            rows=self.repository.get_chunks(list(snapshot.active_ids))
+            eligible={item_id for item_id,row in rows.items() if is_active(row,snapshot)}
+            if only_ids is not None and not set(only_ids) <= eligible:
+                raise ServiceError('knowledge_corpus_invalid',409,'知识块不属于当前活动语料。')
+            if self.vectors.collection != snapshot.collection:
+                raise ServiceError('knowledge_identity_mismatch',409,'检索集合与活动语料不一致。')
+            only_ids=tuple(sorted(eligible if only_ids is None else only_ids))
         def pending_count():
             if only_ids is None:
                 return self.status()['pending']
@@ -73,9 +102,20 @@ class KnowledgeService:
             try:
                 vectors=self.embedding.embed([embedding_text(r.draft) for r in rows])
                 if len(vectors)!=len(rows):raise ValueError('wrong vector batch count')
-                items=[VectorItem(r.id,v,content_fingerprint(r.draft)) for r,v in zip(rows,vectors)]
+                if snapshot is None:
+                    items=[VectorItem(r.id,v,content_fingerprint(r.draft)) for r,v in zip(rows,vectors)]
+                else:
+                    from retailq.knowledge.retrieval_contracts import IndexedChunk
+                    items=[]
+                    for r,v in zip(rows,vectors):
+                        fingerprint=content_fingerprint(r.draft)
+                        source=next((s for s in snapshot.sources if r.id in s.chunk_ids),None)
+                        items.append(IndexedChunk(r.id,v,fingerprint,embedding_text(r.draft),r.draft.category,
+                            r.draft.content_type or 'faq',source.key if source else 'review',source.digest if source else fingerprint))
                 ids=self.vectors.upsert(items)
                 if set(ids)!={r.id for r in rows}:raise ValueError('wrong vector ids')
+                if snapshot is not None and self.vectors.fingerprints(ids)!={item.id:item.fingerprint for item in items}:
+                    raise ValueError('vector fingerprint mismatch')
             except Exception as exc:
                 failed+=len(rows)
                 code=exc.code if isinstance(exc,ServiceError) else 'knowledge_vectorize_failed'
@@ -94,6 +134,12 @@ class KnowledgeService:
 
     def reconcile(self) -> list[int]:
         rows=[r for r in self.repository.all_chunks() if r.vectorize_status=='done']
+        if self.corpus is not None:
+            from retailq.knowledge.corpus import is_active
+            snapshot=self.corpus.active()
+            if self.vectors.collection != snapshot.collection:
+                raise ServiceError('knowledge_identity_mismatch',409,'检索集合与活动语料不一致。')
+            rows=[row for row in rows if is_active(row,snapshot)]
         missing=[]
         for offset in range(0,len(rows),128):
             batch=rows[offset:offset+128]
@@ -103,6 +149,10 @@ class KnowledgeService:
         return missing
 
     def search_faq(self,keyword: str) -> list[dict]:
+        if self.retrieval_engine is not None:
+            result=self.retrieve(keyword)
+            return [{'id':item.id,'question':item.draft.questions,'answer':complete_excerpt(item.draft.answer),
+                     'category':item.draft.category} for item in result.candidates]
         deadline=time.monotonic()+self.query_timeout_seconds
         vector=self.embedding.embed([normalize_text(keyword)],deadline=deadline)[0]
         hits=self.vectors.search(vector,min(self.top_k*4,100),timeout_seconds=deadline-time.monotonic())

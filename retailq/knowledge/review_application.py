@@ -125,6 +125,9 @@ class ReviewApplication:
                 raise review_error()
             prepared = group.application.prepared
             row = self.knowledge.get_chunks([prepared.chunk_id])[prepared.chunk_id]
+            builder = getattr(self.service, 'index_builder', None)
+            if builder is not None:
+                builder.publish_approved((row.id,), operation_id=group.decision.operation_id)
             app = group.application
             if row.vectorize_status == 'pending':
                 if row.id not in app.vector_requested_ids:

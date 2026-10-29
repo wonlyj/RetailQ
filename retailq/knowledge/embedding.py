@@ -30,17 +30,19 @@ class SiliconFlowEmbedding:
     def __exit__(self,*_): self.close()
     def close(self) -> None: self.http.close()
 
-    def embed(self,texts: list[str],*,deadline: float | None=None) -> list[list[float]]:
+    def embed(self,texts: list[str],*,deadline: float | None=None, retries: int | None=None) -> list[list[float]]:
+        if retries is not None and retries not in (0, 1): raise ValueError('invalid retry count')
         for text in texts: self.budget.validate(text)
         result=[]
         size=self.settings.embedding_batch_size
         for offset in range(0,len(texts),size):
-            result.extend(self._batch(texts[offset:offset+size],deadline))
+            result.extend(self._batch(texts[offset:offset+size],deadline,retries))
         return result
 
-    def _batch(self,texts,deadline):
-        end=deadline if deadline is not None else time.monotonic()+self.settings.embedding_timeout_seconds*(1+self.settings.embedding_retries)
-        for attempt in range(1+self.settings.embedding_retries):
+    def _batch(self,texts,deadline,retries=None):
+        retry_count=self.settings.embedding_retries if retries is None else retries
+        end=deadline if deadline is not None else time.monotonic()+self.settings.embedding_timeout_seconds*(1+retry_count)
+        for attempt in range(1+retry_count):
             remaining=end-time.monotonic()
             if remaining<=0: raise unavailable()
             response=None
@@ -54,7 +56,7 @@ class SiliconFlowEmbedding:
                 transient=response.status_code in (429,502,503,504)
             except httpx.RequestError:
                 transient=True
-            if not transient or attempt==self.settings.embedding_retries: raise unavailable()
+            if not transient or attempt==retry_count: raise unavailable()
             try:
                 delay=float(response.headers.get('Retry-After','0.1')) if response is not None else 0.1
             except ValueError:

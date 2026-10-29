@@ -80,6 +80,17 @@ def test_retry_budget_and_authentication_no_retry():
             assert len(calls)==count
 
 
+def test_online_query_can_disable_embedding_retry():
+    calls=[]
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(503)
+    with client(handler, retries=1) as adapter:
+        with pytest.raises(ServiceError):
+            adapter.embed(['知识'], deadline=time.monotonic()+5, retries=0)
+    assert len(calls) == 1
+
+
 def test_model_mismatch_and_retry_after_beyond_deadline():
     p=payload([[1.0]+[0.0]*1023]);p['model']='different-model'
     with client(lambda _:httpx.Response(200,json=p)) as adapter:

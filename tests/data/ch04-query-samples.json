@@ -1,0 +1,14 @@
+[
+  {"raw":"邮费咋算？","normalized":"邮费如何计算？","expansion":"运费"},
+  {"raw":"运费要多少？","normalized":"运费是多少？","expansion":"邮费"},
+  {"raw":"多久退钱？","normalized":"多久可以退钱？","expansion":"退款"},
+  {"raw":"退款咋弄？","normalized":"如何申请退款？","expansion":"退钱"},
+  {"raw":"退货咋办？","normalized":"如何申请退货？","expansion":"退回商品"},
+  {"raw":"发票怎么开？","normalized":"如何开具发票？","expansion":"电子发票"},
+  {"raw":"猫砂盆怎么清理？","normalized":"猫砂盆如何清理？","expansion":"智能猫砂盆"},
+  {"raw":"饮水机咋用？","normalized":"饮水机如何使用？","expansion":"自动饮水机"},
+  {"raw":"喂食器咋装？","normalized":"喂食器如何安装？","expansion":"自动喂食器"},
+  {"raw":"保修多久？","normalized":"保修期限是多久？","expansion":"质保"},
+  {"raw":"MH-LP100 不支持哪些功能？","normalized":"MH-LP100 不支持哪些功能？","expansion":null},
+  {"raw":"签收后48小时内不能退货吗？","normalized":"签收后48小时内不能申请退货吗？","expansion":"退回商品"}
+]

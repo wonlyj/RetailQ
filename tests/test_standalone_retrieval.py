@@ -28,8 +28,8 @@ def standalone():
 
 def test_bm25_hits_literal_model(standalone):
     vector = [1.0] + [0.0] * 1023
-    items = [IndexedChunk(101, vector, 'a'*64, '智能猫砂盆 Pro 型号 MH-LP100 适用猫咪', '智能猫砂盆', 'manual'),
-             IndexedChunk(102, vector, 'b'*64, '自动饮水机 型号 MH-W20 水箱容量', '饮水机', 'manual')]
+    items = [IndexedChunk(101, vector, 'a'*64, '智能猫砂盆 Pro 型号 MH-LP100 适用猫咪', '智能猫砂盆', 'manual', 'source', 'version'),
+             IndexedChunk(102, vector, 'b'*64, '自动饮水机 型号 MH-W20 水箱容量', '饮水机', 'manual', 'source', 'version')]
     assert set(standalone.upsert(items)) == {101, 102}
     hits = standalone.bm25_search('MH-LP100', 50, RetrievalFilters(category='智能猫砂盆'), timeout_seconds=10)
     assert 101 in [hit.id for hit in hits]
@@ -54,8 +54,8 @@ def test_two_clients_and_schema_identity(standalone):
 def test_filters_apply_to_all_paths_and_escape_literals(standalone):
     vector = [1.0] + [0.0] * 1023
     category = '类别"反斜线\\百分%下划线_'
-    standalone.upsert([IndexedChunk(201, vector, 'c'*64, '型号 MH-LP100', category, 'manual'),
-                       IndexedChunk(202, vector, 'd'*64, '型号 MH-LP100', '其他', 'faq')])
+    standalone.upsert([IndexedChunk(201, vector, 'c'*64, '型号 MH-LP100', category, 'manual', 'source', 'version'),
+                       IndexedChunk(202, vector, 'd'*64, '型号 MH-LP100', '其他', 'faq', 'source', 'version')])
     filters = RetrievalFilters(category=category, content_type='manual')
     assert [x.id for x in standalone.dense_search(vector, 50, filters, timeout_seconds=10)] == [201]
     assert [x.id for x in standalone.bm25_search('MH-LP100', 50, filters, timeout_seconds=10)] == [201]
@@ -93,7 +93,7 @@ def test_literal_model_from_imported_sql_chunk(standalone, test_database, tmp_pa
     assert len(matching) == 1
     row = matching[0]
     vector = [1.0] + [0.0] * 1023
-    standalone.upsert([IndexedChunk(row.id, vector, content_fingerprint(row.draft), embedding_text(row.draft), row.draft.category, row.draft.content_type)])
+    standalone.upsert([IndexedChunk(row.id, vector, content_fingerprint(row.draft), embedding_text(row.draft), row.draft.category, row.draft.content_type, 'product-specs.md', next(s.digest for s in plan.sources if s.key == 'product-specs.md'))])
     hits = standalone.bm25_search('MH-LP100', 50, RetrievalFilters(), timeout_seconds=10)
     assert row.id in [hit.id for hit in hits]
     assert 'MH-LP100' in records[row.id].draft.questions

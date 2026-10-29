@@ -35,6 +35,8 @@ class MilvusKnowledgeStore:
             schema.add_field('fingerprint', DataType.VARCHAR, max_length=64)
             schema.add_field('category', DataType.VARCHAR, max_length=1024)
             schema.add_field('content_type', DataType.VARCHAR, max_length=128)
+            schema.add_field('source_key', DataType.VARCHAR, max_length=1024)
+            schema.add_field('source_version', DataType.VARCHAR, max_length=128)
             schema.add_function(Function(name='bm25', function_type=FunctionType.BM25, input_field_names=['text'], output_field_names=['sparse']))
             indexes = self.client.prepare_index_params()
             indexes.add_index(field_name='dense', index_type='FLAT', metric_type='COSINE')
@@ -44,7 +46,8 @@ class MilvusKnowledgeStore:
         fields = {f['name']: f for f in schema['fields']}
         expected = {'id': DataType.INT64, 'dense': DataType.FLOAT_VECTOR, 'text': DataType.VARCHAR,
                     'sparse': DataType.SPARSE_FLOAT_VECTOR, 'fingerprint': DataType.VARCHAR,
-                    'category': DataType.VARCHAR, 'content_type': DataType.VARCHAR}
+                    'category': DataType.VARCHAR, 'content_type': DataType.VARCHAR,
+                    'source_key': DataType.VARCHAR, 'source_version': DataType.VARCHAR}
         valid = (schema.get('description') == 'retailq:' + self.identity and set(fields) == set(expected)
                  and not schema.get('auto_id') and not schema.get('enable_dynamic_field'))
         if valid:
@@ -52,7 +55,8 @@ class MilvusKnowledgeStore:
             valid &= bool(fields['id'].get('is_primary')) and fields['dense']['params'].get('dim') == 1024
             valid &= bool(fields['sparse'].get('is_function_output'))
             valid &= all(fields[name]['params'].get('max_length') == size for name, size in
-                         (('text', 65535), ('fingerprint', 64), ('category', 1024), ('content_type', 128)))
+                         (('text', 65535), ('fingerprint', 64), ('category', 1024), ('content_type', 128),
+                          ('source_key', 1024), ('source_version', 128)))
             try:
                 valid &= fields['text']['params'].get('enable_analyzer') == 'true'
                 valid &= json.loads(fields['text']['params']['analyzer_params']) == {'type': 'chinese'}
@@ -94,11 +98,13 @@ class MilvusKnowledgeStore:
             self._vector(item.vector)
             if not re.fullmatch(r'[0-9a-f]{64}', item.fingerprint):
                 raise ValueError('invalid fingerprint')
-            for value, limit in ((item.text, 65535), (item.category, 1024), (item.content_type, 128)):
+            for value, limit in ((item.text, 65535), (item.category, 1024), (item.content_type, 128),
+                                 (item.source_key, 1024), (item.source_version, 128)):
                 if not isinstance(value, str) or not value.strip() or len(value.encode('utf-8')) > limit:
                     raise ValueError('invalid text field')
             rows.append({'id': item.id, 'dense': item.vector, 'text': item.text, 'fingerprint': item.fingerprint,
-                         'category': item.category, 'content_type': item.content_type})
+                         'category': item.category, 'content_type': item.content_type,
+                         'source_key': item.source_key, 'source_version': item.source_version})
         if not rows:
             return []
         if len({row['id'] for row in rows}) != len(rows):

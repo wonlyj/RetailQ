@@ -10,6 +10,8 @@ class IndexedChunk:
     text: str
     category: str
     content_type: str
+    source_key: str
+    source_version: str
 
 
 @dataclass(frozen=True)

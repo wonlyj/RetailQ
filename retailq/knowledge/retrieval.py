@@ -36,6 +36,7 @@ class RetrievalEngine:
         _remaining(deadline)
         records = self.repository.get_chunks([hit.id for hit in hits])
         candidates = []
+        valid_hits = []
         seen = set()
         for rank, hit in enumerate(hits, 1):
             row = records.get(hit.id)
@@ -50,6 +51,7 @@ class RetrievalEngine:
             if not is_active(row, snapshot) or dict(snapshot.fingerprints).get(row.id) != hit.fingerprint:
                 continue
             candidates.append(EvidenceChunk(row.id, row.draft, rank, hit.score))
+            valid_hits.append(hit)
         if strategy == 'hybrid_rerank':
             candidates = self.reranker.rerank(understood.raw_question, tuple(candidates), deadline=deadline)
-        return RetrievalResult(understood, snapshot, strategy, tuple(candidates[:10]), tuple(hits))
+        return RetrievalResult(understood, snapshot, strategy, tuple(candidates[:10]), tuple(valid_hits))

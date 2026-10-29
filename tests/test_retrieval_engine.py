@@ -46,6 +46,7 @@ def test_four_strategies_share_understanding_and_drop_stale_and_pending():
         result = engine.retrieve(understood, snapshot, strategy, RetrievalFilters(), deadline=time.monotonic()+5)
         assert result.understanding is understood and result.snapshot is snapshot
         assert [item.id for item in result.candidates] == [1]
+        assert [hit.id for hit in result.candidate_hits] == [1]
     assert embedding.calls == 3
 
 

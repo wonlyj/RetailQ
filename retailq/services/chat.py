@@ -168,7 +168,9 @@ class ChatService:
         message_id = await self._write(self.rag_repository.finalize,turn.conversation_id,turn.user_id,call['id'],
                                        answer=answer,source=source,reason=reason)
         if source is None:
-            yield ChatEvent('sources',{'message_id':str(message_id),'citations':[asdict(c) for c in bundle.citations]})
+            from retailq.api.sources import public_citation
+            yield ChatEvent('sources',{'message_id':str(message_id), 'tool_call_id':call['id'],
+                                       'citations':[public_citation(asdict(c)).model_dump() for c in bundle.citations]})
         yield ChatEvent('token',{'text':answer})
         yield ChatEvent('done',{'finish_reason':'stop'})
 

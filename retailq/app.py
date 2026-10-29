@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from retailq.api.chat import router as chat_router
 from retailq.api.knowledge import router as knowledge_router
+from retailq.api.sources import router as sources_router
 from retailq.api.knowledge_access import require_console_local
 from retailq.db import Database
 from retailq.repositories import ChatRepository
@@ -90,6 +91,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.state.settings = settings
     application.include_router(chat_router)
     application.include_router(knowledge_router)
+    application.include_router(sources_router)
     web_directory = Path(__file__).parent / "web"
     application.mount("/assets", StaticFiles(directory=web_directory), name="chat-assets")
 

@@ -47,6 +47,28 @@ class ChatRepository:
             raise ServiceError('knowledge_not_configured',503,'知识查询未配置。')
         return self.rag_retrieve(question, **filters)
 
+    @database_errors
+    def load_citation_bundle(self, conversation_id, user_id, tool_call_id):
+        from pydantic import ValidationError
+        from retailq.api.source_schemas import CitationRecord
+        with self.database.sessions() as session:
+            self._owned(session, conversation_id, user_id)
+            tool = session.scalar(select(Message).where(Message.conversation_id == conversation_id, Message.role == 'tool',
+                Message.tool_call_id.collate('utf8mb4_0900_bin') == tool_call_id))
+            if tool is None: raise ServiceError('citation_not_found', 404, '未找到引用来源。')
+            try:
+                payload = json.loads(tool.content)
+                final = payload['rag_finalization']
+                assistant = session.get(Message, final['assistant_message_id'])
+                if assistant is None or assistant.conversation_id != conversation_id or assistant.role != 'assistant': raise ValueError()
+                entries = payload['rag_evidence']['citations']
+                if not isinstance(entries, list) or len(entries) > 10: raise ValueError()
+                result = tuple(CitationRecord.model_validate(item) for item in entries)
+                if [item.number for item in result] != list(range(1, len(result)+1)): raise ValueError()
+                return result
+            except (ValueError, KeyError, TypeError, ValidationError):
+                raise ServiceError('citation_invalid', 409, '引用快照损坏或不完整，请核查。') from None
+
     @staticmethod
     def _owned(session, cid: int, user_id: str, *, lock: bool = False):
         # Opaque identities must match Python/tool-call semantics even though

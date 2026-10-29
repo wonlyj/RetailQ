@@ -63,6 +63,17 @@ def test_filters_apply_to_all_paths_and_escape_literals(standalone):
     assert not standalone.hybrid_search(vector, 'MH-LP100', RetrievalFilters(category='不存在'), timeout_seconds=10)
 
 
+def test_category_prefix_treats_wildcards_as_literals(standalone):
+    vector = [1.0] + [0.0] * 1023
+    prefix = '目录%_\\'
+    standalone.upsert([IndexedChunk(301, vector, 'a'*64, '型号 MH-LP100', prefix + ' / 品类', 'manual', 's', 'v'),
+                       IndexedChunk(302, vector, 'b'*64, '型号 MH-LP100', '目录XY / 品类', 'manual', 's', 'v')])
+    filters = RetrievalFilters(category_prefix=prefix)
+    assert [h.id for h in standalone.dense_search(vector, 50, filters, timeout_seconds=10)] == [301]
+    assert [h.id for h in standalone.bm25_search('MH-LP100', 50, filters, timeout_seconds=10)] == [301]
+    assert [h.id for h in standalone.hybrid_search(vector, 'MH-LP100', filters, timeout_seconds=10)] == [301]
+
+
 def test_schema_tampering_is_rejected(standalone, monkeypatch):
     original = standalone.client.describe_collection
     def altered(name):

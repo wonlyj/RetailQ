@@ -91,12 +91,20 @@ class MilvusKnowledgeStore:
     def _filter(filters):
         filters = filters or RetrievalFilters()
         parts = []
+        if filters.category is not None and filters.category_prefix is not None:
+            raise ValueError('choose category or category_prefix')
         for field in ('category', 'content_type'):
             value = getattr(filters, field)
             if value is not None:
                 if not isinstance(value, str) or not value or len(value.encode('utf-8')) > (1024 if field == 'category' else 128):
                     raise ValueError('invalid filter')
                 parts.append(f'{field} == {json.dumps(value, ensure_ascii=False)}')
+        if filters.category_prefix is not None:
+            value = filters.category_prefix
+            if not isinstance(value, str) or not value or len(value.encode('utf-8')) > 1024:
+                raise ValueError('invalid category prefix')
+            pattern = value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_') + ' / %'
+            parts.append(f'(category == {json.dumps(value, ensure_ascii=False)} or category like {json.dumps(pattern, ensure_ascii=False)})')
         return ' and '.join(parts)
 
     def upsert(self, items):

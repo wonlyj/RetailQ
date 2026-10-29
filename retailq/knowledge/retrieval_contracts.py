@@ -18,6 +18,7 @@ class IndexedChunk:
 class RetrievalFilters:
     category: str | None = None
     content_type: str | None = None
+    category_prefix: str | None = None
 
 
 @dataclass(frozen=True)

@@ -43,7 +43,9 @@ class RetrievalEngine:
                 continue
             seen.add(hit.id)
             if filters and ((filters.category is not None and row.draft.category != filters.category) or
-                            (filters.content_type is not None and row.draft.content_type != filters.content_type)):
+                            (filters.content_type is not None and row.draft.content_type != filters.content_type) or
+                            (filters.category_prefix is not None and row.draft.category != filters.category_prefix and
+                             not row.draft.category.startswith(filters.category_prefix + ' / '))):
                 continue
             if not is_active(row, snapshot) or dict(snapshot.fingerprints).get(row.id) != hit.fingerprint:
                 continue

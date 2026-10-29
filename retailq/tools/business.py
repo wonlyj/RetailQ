@@ -29,9 +29,20 @@ def business_tools(repository, context):
                 'updated_at':datetime.now().isoformat(timespec='seconds')}
 
     @tool(args_schema=FAQInput)
-    async def query_faq(keyword: str) -> dict:
+    async def query_faq(keyword: str, category: str | None = None, category_prefix: str | None = None, content_type: str | None = None) -> dict:
         """根据用户原话查询退货政策、配送费用、商品FAQ和售后知识，支持相近问法。只依据返回内容回答。"""
-        items = await asyncio.to_thread(repository.search_faq, keyword)
+        if getattr(repository, 'rag_retrieve', None) is not None:
+            if not context.raw_question: raise ServiceError('rag_context_missing', 409, '缺少当前用户问题。')
+            if (category and category not in context.raw_question) or (category_prefix and category_prefix not in context.raw_question):
+                raise ServiceError('rag_filter_unconfirmed', 422, '品类过滤条件未由用户明确提供。')
+            retrieve = getattr(repository, 'retrieve_knowledge', repository.rag_retrieve)
+            result = await asyncio.to_thread(retrieve, context.raw_question, category=category,
+                                             category_prefix=category_prefix, content_type=content_type)
+            context.retrieval_result = result
+            items = [{'id':c.id, 'question':c.draft.questions, 'answer':c.draft.answer, 'category':c.draft.category}
+                     for c in result.candidates]
+        else:
+            items = await asyncio.to_thread(repository.search_faq, keyword)
         return {'found':bool(items), 'items':items}
 
     @tool(args_schema=TicketInput)

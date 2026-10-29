@@ -10,11 +10,13 @@ from retailq.config import Settings
 from retailq.errors import ServiceError
 
 
-@dataclass(frozen=True)
+@dataclass
 class ToolContext:
     conversation_id: int
     user_id: str
     tool_call_id: str | None = None
+    raw_question: str | None = None
+    retrieval_result: object | None = None
 
 
 @dataclass(frozen=True)
@@ -73,12 +75,13 @@ class ToolRegistry:
         attempts = 1 + (self.settings.tool_read_retries if retry_safe else 0)
         for attempt in range(attempts):
             task = asyncio.create_task(self._invoke(tool, arguments, write))
-            if write:
+            retain = write or tool.name == 'query_faq'
+            if retain:
                 self.pending.add(task)
                 task.add_done_callback(self.pending.discard)
             try:
-                return await asyncio.wait_for(asyncio.shield(task) if write else task,
-                                              self.settings.tool_timeout_seconds)
+                timeout = self.settings.knowledge_query_timeout_seconds if tool.name == 'query_faq' and getattr(self.repository, 'rag_retrieve', None) else self.settings.tool_timeout_seconds
+                return await asyncio.wait_for(asyncio.shield(task) if retain else task, timeout)
             except TimeoutError:
                 if write:
                     return failure('outcome_unknown','工单操作等待超时，结果尚未确认，请勿重复提交。','pending')

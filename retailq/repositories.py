@@ -40,6 +40,12 @@ class ChatRepository:
     def __init__(self, database: Database,faq_search: Callable[[str],list[dict]] | None=None):
         self.database = database
         self.faq_search = faq_search
+        self.rag_retrieve = None
+
+    def retrieve_knowledge(self, question: str, **filters):
+        if self.rag_retrieve is None:
+            raise ServiceError('knowledge_not_configured',503,'知识查询未配置。')
+        return self.rag_retrieve(question, **filters)
 
     @staticmethod
     def _owned(session, cid: int, user_id: str, *, lock: bool = False):

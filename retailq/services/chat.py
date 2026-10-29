@@ -1,8 +1,9 @@
 import asyncio
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import partial
 import json
+from pathlib import Path
 
 import anyio
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -22,6 +23,8 @@ class PreparedTurn:
     prepared: PreparedChat
     prior_call_ids: set[str]
     registry: ToolRegistry
+    raw_question: str = ''
+    lease: object | None = None
     released: bool = False
 
 
@@ -33,37 +36,47 @@ class ChatEvent:
 
 class ChatService:
     """One process, one active turn per conversation; transactions stay short."""
-    def __init__(self, repository, gateway, settings):
+    def __init__(self, repository, gateway, settings, *, rag_gateway=None, rag_repository=None, confidence_policy=None, coordinator=None):
         self.repository, self.gateway, self.settings = repository, gateway, settings
+        self.rag_gateway, self.rag_repository, self.confidence_policy = rag_gateway, rag_repository, confidence_policy
+        self.coordinator = coordinator
         self.busy: set[int] = set()
         self.background: set[asyncio.Task] = set()
 
-    async def _write(self, method, *args):
+    async def _write(self, method, *args, **kwargs):
         # Shield only short database operations, never model generation.
         with anyio.CancelScope(shield=True):
-            return await anyio.to_thread.run_sync(partial(method,*args))
+            return await anyio.to_thread.run_sync(partial(method,*args,**kwargs))
 
     async def prepare(self, body: ChatRequest) -> PreparedTurn:
         cid = body.conversation_id
+        lease = None
         if cid is not None:
             if cid in self.busy:
                 raise ServiceError('conversation_busy',409,'该会话仍在处理上一轮，请稍后再试。')
             self.busy.add(cid)
         try:
+            if cid is not None and self.coordinator is not None:
+                lease = self.coordinator.try_acquire('conversation', str(cid))
+                if lease is None: raise ServiceError('conversation_busy',409,'该会话仍在处理上一轮，请稍后再试。')
             records = await asyncio.to_thread(self.repository.load_messages,cid,body.user_id) if cid is not None else []
             if cid is None:
                 turns = [[HumanMessage(content=body.history[i].content),AIMessage(content=body.history[i+1].content)]
                          for i in range(0,len(body.history),2)]
             else:
                 turns = history_turns(records)
-            registry = build_registry(self.repository,ToolContext(cid or 0,body.user_id),self.settings)
+            registry = build_registry(self.repository,ToolContext(cid or 0,body.user_id,raw_question=body.message),self.settings)
             schemas = [convert_to_openai_tool(t) for t in registry.tools]
             prepared = prepare_tool_chat(body.message,turns,schemas,self.settings)
             cid = await self._write(self.repository.start_turn,body.user_id,cid,body.history,body.message)
+            if lease is None and self.coordinator is not None:
+                lease = self.coordinator.try_acquire('conversation', str(cid))
+                if lease is None: raise ServiceError('conversation_busy',409,'该会话仍在处理上一轮，请稍后再试。')
             self.busy.add(cid)
             prior_ids = {c['id'] for r in records for c in (r.tool_calls or []) if c.get('id')}
-            return PreparedTurn(cid,body.user_id,prepared,prior_ids,registry)
+            return PreparedTurn(cid,body.user_id,prepared,prior_ids,registry,body.message,lease)
         except BaseException:
+            if lease is not None: lease.close()
             if cid is not None:
                 self.busy.discard(cid)
             raise
@@ -85,10 +98,16 @@ class ChatService:
                 if len(selection.tool_calls) != 1:
                     raise ServiceError('multiple_tool_calls',502,'本章每轮仅支持一个工具，本轮未执行工具。')
                 call = selection.tool_calls[0]
-                turn.registry = build_registry(self.repository,ToolContext(turn.conversation_id,turn.user_id,call['id']),self.settings)
+                turn.registry = build_registry(self.repository,ToolContext(turn.conversation_id,turn.user_id,call['id'],turn.raw_question),self.settings)
                 status = {'tool_call_id':call['id'],'name':call['name']}
                 yield ChatEvent('tool_status',{**status,'status':'running'})
                 outcome = await turn.registry.execute(call)
+                if call['name'] == 'query_faq' and getattr(self.repository, 'rag_retrieve', None) is not None:
+                    if not outcome.payload['ok']:
+                        raise ServiceError(outcome.payload['error']['code'],503,outcome.payload['error']['message'])
+                    async for event in self._rag_answer(turn, call, outcome):
+                        yield event
+                    return
                 content = json.dumps(outcome.payload,ensure_ascii=False)
                 if outcome.receipt_state == 'unrecorded':
                     await self._write(self.repository.append_message,turn.conversation_id,turn.user_id,'tool',content,None,call['id'])
@@ -119,6 +138,40 @@ class ChatService:
             error = public_error(exc)
             yield ChatEvent('error',{'code':error.code,'message':error.public_message})
 
+    async def _rag_answer(self, turn, call, outcome):
+        from retailq.knowledge.answer import prepare_bundle, validate_decision
+        if self.rag_gateway is None or self.rag_repository is None or self.confidence_policy is None:
+            raise ServiceError('rag_policy_unavailable',503,'知识回答尚未完成校准或配置。')
+        result = turn.registry.context.retrieval_result
+        if result is None: raise ServiceError('knowledge_retrieval_unavailable',503,'知识查询结果不可用。')
+        bundle = None
+        allowed = self.confidence_policy.allows(result)
+        if allowed:
+            prompt = (Path(__file__).resolve().parents[1] / 'prompts' / 'rag_answer.txt').read_text(encoding='utf-8')
+            bundle = prepare_bundle(result, system_prompt=prompt, input_budget=self.settings.input_budget)
+        receipt = dict(outcome.payload)
+        receipt['rag_evidence'] = {'bundle_hash':bundle.bundle_hash if bundle else None,
+                                   'citations':[asdict(c) for c in bundle.citations] if bundle else []}
+        content = json.dumps(receipt,ensure_ascii=False)
+        await self._write(self.repository.append_message,turn.conversation_id,turn.user_id,'tool',content,None,call['id'])
+        yield ChatEvent('tool_status',{'tool_call_id':call['id'],'name':call['name'],'status':'completed'})
+        source, reason = None, None
+        if not allowed:
+            answer, source, reason = '知识库没有足够可靠的依据，暂时无法回答这个问题。', 'retrieval_low_conf', '检索证据不足或低于校准门槛'
+        else:
+            decision = await self.rag_gateway.answer(bundle)
+            validate_decision(decision, bundle)
+            if decision.useful:
+                answer = decision.answer
+            else:
+                answer, source, reason = '知识库中的信息不足以回答这个问题，请查看官方规则或联系人工客服。', 'self_check', decision.reason
+        message_id = await self._write(self.rag_repository.finalize,turn.conversation_id,turn.user_id,call['id'],
+                                       answer=answer,source=source,reason=reason)
+        if source is None:
+            yield ChatEvent('sources',{'message_id':str(message_id),'citations':[asdict(c) for c in bundle.citations]})
+        yield ChatEvent('token',{'text':answer})
+        yield ChatEvent('done',{'finish_reason':'stop'})
+
     async def release(self, turn: PreparedTurn):
         if turn.released:
             return
@@ -129,11 +182,13 @@ class ChatService:
                     await turn.registry.drain()
                 finally:
                     self.busy.discard(turn.conversation_id)
+                    if turn.lease is not None: turn.lease.close()
             task = asyncio.create_task(settle())
             self.background.add(task)
             task.add_done_callback(self.background.discard)
         else:
             self.busy.discard(turn.conversation_id)
+            if turn.lease is not None: turn.lease.close()
 
     async def aclose(self):
         if self.background:

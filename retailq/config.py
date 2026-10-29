@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     knowledge_query_timeout_seconds: float = Field(default=30, gt=0, le=120)
     rerank_base_url: str = 'https://api.siliconflow.cn/v1'
     rerank_api_key: SecretStr = Field(default=SecretStr(''), repr=False)
+    rerank_reuse_embedding_key: bool = False
     rerank_proxy: SecretStr = Field(default=SecretStr(''), repr=False)
     rerank_model: Literal['BAAI/bge-reranker-v2-m3'] = 'BAAI/bge-reranker-v2-m3'
     rerank_timeout_seconds: float = Field(default=20, gt=0, le=120)
@@ -117,6 +118,11 @@ class Settings(BaseSettings):
     @property
     def is_embedding_configured(self) -> bool:
         return bool(self.embedding_base_url and self.embedding_api_key.get_secret_value().strip())
+
+    @property
+    def effective_rerank_key(self) -> str:
+        return self.rerank_api_key.get_secret_value().strip() or (
+            self.embedding_api_key.get_secret_value().strip() if self.rerank_reuse_embedding_key else '')
 
     @property
     def is_knowledge_configured(self) -> bool:

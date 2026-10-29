@@ -36,7 +36,7 @@ def recovery_case(test_database):
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 @pytest.mark.parametrize('stage,decision', [
     ('after_decision_persisted', 'approve'), ('after_decision_persisted', 'reject'),
     ('after_prepared_before_sql_commit', 'approve'), ('after_prepared_before_sql_commit', 'reject'),
@@ -65,7 +65,7 @@ def test_parent_waits_for_worker_exit_before_reopen(recovery_case, stage, decisi
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_killed_committed_group_has_same_confirmed_target_after_restart(recovery_case):
     runner, output = recovery_case
     report = runner.run_case(output, 'after_sql_commit_before_applied', 'approve', 'deterministic')
@@ -76,7 +76,7 @@ def test_killed_committed_group_has_same_confirmed_target_after_restart(recovery
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_killed_prepared_transaction_not_misread_as_applied(recovery_case):
     runner, output = recovery_case
     report = runner.run_case(output, 'after_prepared_before_sql_commit', 'approve', 'deterministic')
@@ -88,7 +88,7 @@ def test_killed_prepared_transaction_not_misread_as_applied(recovery_case):
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 @pytest.mark.parametrize('stage', ['queued_before_worker', 'corrupt_run_seal', 'seal_active_worker'])
 def test_sealed_queued_command_stays_sealed_after_restart(recovery_case, stage):
     runner, output = recovery_case

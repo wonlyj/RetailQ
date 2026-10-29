@@ -18,7 +18,7 @@ def open_runtime(stack, config):
     from retailq.knowledge.runtime import KnowledgeRuntime
     from retailq.knowledge.ownership import DirectoryOwner
     from retailq.knowledge.repository import KnowledgeRepository
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from tests.support.standalone_legacy import MilvusKnowledgeStore
     from retailq.knowledge.service import KnowledgeService
     from tests.support.knowledge import FakeEmbedding, TestBudget
     from tests.support.reviews import ReviewGateway
@@ -45,8 +45,9 @@ def open_runtime(stack, config):
         budget, embedding = TestBudget(), FakeEmbedding()
         identity = {'provider':'test','model':'deterministic-test','endpoint':'fixture',
                     'dimension':'1024','metric':'COSINE','schema_version':'1'}
-    vectors = stack.enter_context(MilvusKnowledgeStore(root / 'knowledge.db', identity))
-    service = KnowledgeService(KnowledgeRepository(database), embedding, vectors, budget)
+    repository = KnowledgeRepository(database)
+    vectors = stack.enter_context(MilvusKnowledgeStore(root / 'knowledge.db', identity, repository=repository))
+    service = KnowledgeService(repository, embedding, vectors, budget)
     runtime = KnowledgeRuntime(service, owner, settings=settings, embedding=embedding, vectors=vectors,
                                gateway=ReviewGateway(database))
     stack.callback(runtime.close)

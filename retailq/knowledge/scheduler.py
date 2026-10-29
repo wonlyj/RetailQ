@@ -37,9 +37,20 @@ class DailyKnowledgeScheduler:
 
     async def run_due(self):
         if self.stopping or not self.runtime.settings.knowledge_schedule_enabled:return
+        coordinator=getattr(self.runtime,'coordinator',None)
+        lease=coordinator.try_acquire('scheduler') if coordinator else None
+        if coordinator and lease is None:return
+        try:
+            await self._run_due_as_leader()
+        finally:
+            if lease is not None:lease.close()
+
+    async def _run_due_as_leader(self):
         now=self.clock().astimezone(SHANGHAI)
         due=now.replace(hour=self.runtime.settings.knowledge_schedule_hour,minute=self.runtime.settings.knowledge_schedule_minute,second=0,microsecond=0)
         day=now.date().isoformat()
+        state=json.loads(self.path.read_text(encoding='utf-8')) if self.path.exists() else {}
+        self.last_attempt=state.get('last_attempt')
         if now<due or self.last_attempt==day:return
         self.last_attempt=day
         state={'last_attempt':day,'phase':'running','complete':False}
@@ -88,6 +99,7 @@ class DailyKnowledgeScheduler:
             await self.run_due()
             if self.stopping:break
             delay=max(0.01,(next_run_at(self.clock(),hour=self.runtime.settings.knowledge_schedule_hour,minute=self.runtime.settings.knowledge_schedule_minute)-self.clock().astimezone(SHANGHAI)).total_seconds())
+            if getattr(self.runtime,'coordinator',None) is not None:delay=min(delay,30)
             try:await asyncio.wait_for(self.wakeup.wait(),timeout=delay)
             except TimeoutError:pass
 

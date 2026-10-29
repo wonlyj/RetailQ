@@ -15,7 +15,7 @@ from tests.support.reviews import (
     make_application, queued_seal, vector_count, seed_closed_source, queued_run_with_sources, make_preparer,
 )
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone]
 
 
 def test_approval_uses_human_category_and_same_id_on_retry(review_harness):

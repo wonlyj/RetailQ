@@ -18,6 +18,15 @@ def test_default_rag_configuration():
     assert settings.rerank_model == 'BAAI/bge-reranker-v2-m3'
 
 
+def test_rerank_key_reuse_requires_explicit_opt_in():
+    settings = Settings(_env_file=None, embedding_api_key='embedding-secret')
+    assert settings.effective_rerank_key == ''
+    settings = Settings(_env_file=None, embedding_api_key='embedding-secret', rerank_reuse_embedding_key=True)
+    assert settings.effective_rerank_key == 'embedding-secret'
+    settings = Settings(_env_file=None, embedding_api_key='embedding-secret', rerank_api_key='rerank-secret', rerank_reuse_embedding_key=True)
+    assert settings.effective_rerank_key == 'rerank-secret'
+
+
 def test_minio_official_binary_is_pinned_in_both_compose_files():
     dockerfile = Path('docker/minio/Dockerfile').read_text(encoding='utf-8')
     assert '5708e53878085ab263c333b24fa7e59980425d64a9b085996b58799f9645e1db' in dockerfile

@@ -6,7 +6,7 @@ import pytest
 
 from retailq.errors import ServiceError
 
-pytestmark=pytest.mark.lite
+pytestmark=pytest.mark.standalone
 
 
 def identity():
@@ -14,7 +14,7 @@ def identity():
 
 
 def store(path,metadata=None):
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from tests.support.standalone_legacy import MilvusKnowledgeStore
     return MilvusKnowledgeStore(path,metadata or identity())
 
 
@@ -24,7 +24,7 @@ def item(number,axis=0):
     return VectorItem(number,vector,'a'*64)
 
 
-def test_lite_explicit_schema_and_cosine_order(tmp_path):
+def test_standalone_explicit_schema_and_cosine_order(tmp_path):
     with store(tmp_path/'knowledge.db') as db:
         assert set(db.upsert([item(1),item(2,1)]))=={1,2}
         hits=db.search(item(1).vector,2)
@@ -49,8 +49,13 @@ def test_schema_or_identity_mismatch_is_rejected(tmp_path):
     changed=identity()|{'model':'different-model'}
     with pytest.raises(ServiceError):store(path,changed)
     from pymilvus import MilvusClient
+    from tests.support.standalone_legacy import URI, CREATED, collection_for
+    from tests.support.milvus import require_isolated_milvus
     bad=tmp_path/'bad.db'
-    client=MilvusClient(str(bad));client.create_collection('knowledge',dimension=4);client.close()
+    collection=collection_for(bad)
+    require_isolated_milvus(URI,collection)
+    client=MilvusClient(URI);client.create_collection(collection,dimension=4);client.close()
+    CREATED.add(collection)
     with pytest.raises(ServiceError):store(bad)
 
 

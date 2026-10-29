@@ -42,6 +42,8 @@ def business_tools(repository, context):
             items = [{'id':c.id, 'question':c.draft.questions, 'answer':c.draft.answer, 'category':c.draft.category}
                      for c in result.candidates]
         else:
+            if getattr(repository, 'rag_required', False):
+                raise ServiceError('knowledge_not_configured',503,'知识查询服务不可用。')
             items = await asyncio.to_thread(repository.search_faq, keyword)
         return {'found':bool(items), 'items':items}
 

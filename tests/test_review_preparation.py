@@ -10,7 +10,7 @@ from tests.support.reviews import (
     ReviewGateway, vector_count,
 )
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone]
 
 
 def two_sources(h):

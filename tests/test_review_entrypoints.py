@@ -12,7 +12,7 @@ from tests.support.reviews import (
     RID, review_harness, job_env, seed_closed_source, review_runtime_factory,
 )
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone]
 
 
 def cli_settings(root):

@@ -187,7 +187,7 @@ def test_unverified_approved_ids_are_rejected(test_database, tmp_path):
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_review_approval_resolver_requires_committed_application(review_harness):
     from threading import Event
     from sqlalchemy import text

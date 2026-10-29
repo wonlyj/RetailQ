@@ -26,11 +26,12 @@ class QueryNormalizer:
             proposed, reason = raw_question, 'empty_normalization'
         elif any(token not in proposed for token in _CONSTRAINTS.findall(raw_question)):
             proposed, reason = raw_question, 'literal_constraint_lost'
+        search_text = proposed if proposed == raw_question else proposed + ' ' + raw_question
         terms = []
         for term, expansions in self.synonyms.items():
-            if term in proposed:
+            if term in search_text:
                 for expansion in expansions:
-                    if expansion not in proposed and expansion not in terms:
+                    if expansion not in search_text and expansion not in terms:
                         terms.append(expansion)
-        bm25 = proposed + ((' ' + ' '.join(terms[:self.max_expansions])) if terms else '')
+        bm25 = search_text + ((' ' + ' '.join(terms[:self.max_expansions])) if terms else '')
         return QueryUnderstanding(raw_question, proposed, bm25, reason)

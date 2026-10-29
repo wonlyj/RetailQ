@@ -23,7 +23,7 @@ def test_importing_disabled_app_does_not_populate_environment():
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 @pytest.mark.anyio
 async def test_faq_schema_and_result_shape_are_unchanged(service):
     schema=FAQInput.model_json_schema()
@@ -86,7 +86,9 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
         async def aclose(self):events.append('gateway-close')
     class Knowledge:
         can_prepare_review=True
+        coordinator=None
         def search_faq(self,query):return []
+        def retrieve(self,query,**kwargs):return None
         def close(self):events.append('knowledge-close')
     def opened(settings,database):events.append('knowledge-open');return Knowledge()
     class Scheduler:

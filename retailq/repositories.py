@@ -41,6 +41,7 @@ class ChatRepository:
         self.database = database
         self.faq_search = faq_search
         self.rag_retrieve = None
+        self.rag_required = False
 
     def retrieve_knowledge(self, question: str, **filters):
         if self.rag_retrieve is None:

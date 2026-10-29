@@ -21,6 +21,11 @@ def test_normalization_preserves_time_start_and_expands_only_for_search():
     assert '退回商品' not in result.normalized_query
 
 
+def test_bm25_retains_original_words_when_rewritten():
+    result = QueryNormalizer(lambda raw, deadline: '配送费用如何计算？', {'邮费':['运费']}).understand('邮费咋算？', deadline=time.monotonic()+5)
+    assert '邮费咋算？' in result.bm25_query and '运费' in result.bm25_query
+
+
 def test_labeled_query_examples():
     import json
     from pathlib import Path

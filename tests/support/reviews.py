@@ -54,11 +54,11 @@ class ReviewHarness:
 def review_harness(test_database, tmp_path):
     from retailq.knowledge.repository import KnowledgeRepository
     from retailq.knowledge.review_repository import ReviewRepository
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from tests.support.standalone_legacy import MilvusKnowledgeStore
     from tests.support.knowledge import TestBudget, FakeEmbedding
     from tests.test_knowledge_vectors import identity
     knowledge = KnowledgeRepository(test_database)
-    with MilvusKnowledgeStore(tmp_path / 'knowledge.db', identity()) as vectors:
+    with MilvusKnowledgeStore(tmp_path / 'knowledge.db', identity(), repository=knowledge) as vectors:
         yield ReviewHarness(test_database, knowledge, ReviewRepository(knowledge),
                             make_store(tmp_path), TestBudget(), FakeEmbedding(), vectors)
 
@@ -272,13 +272,14 @@ def review_runtime_factory(settings, database):
     from retailq.knowledge.runtime import KnowledgeRuntime
     from retailq.knowledge.ownership import DirectoryOwner
     from retailq.knowledge.repository import KnowledgeRepository
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from tests.support.standalone_legacy import MilvusKnowledgeStore
     from retailq.knowledge.service import KnowledgeService
     from tests.support.knowledge import FakeEmbedding, TestBudget
     from tests.test_knowledge_vectors import identity
     owner = DirectoryOwner(Path(settings.knowledge_data_dir)).__enter__()
-    vectors = MilvusKnowledgeStore(owner.root / 'knowledge.db', identity())
+    repository = KnowledgeRepository(database)
+    vectors = MilvusKnowledgeStore(owner.root / 'knowledge.db', identity(), repository=repository)
     embedding = FakeEmbedding()
-    service = KnowledgeService(KnowledgeRepository(database), embedding, vectors, TestBudget())
+    service = KnowledgeService(repository, embedding, vectors, TestBudget())
     return KnowledgeRuntime(service, owner, settings=settings, embedding=embedding, vectors=vectors,
                              gateway=ReviewGateway(database))

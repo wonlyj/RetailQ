@@ -127,7 +127,7 @@ def test_real_standalone_build_and_publish(test_database, tmp_path):
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_publish_approved_requires_receipt_and_is_idempotent(review_harness, tmp_path):
     from retailq.knowledge.corpus_import import ReviewApprovalResolver
     from tests.support.reviews import prepared_new_group, queued_approval, make_application, confirmed_target
@@ -181,13 +181,16 @@ def test_status_distinguishes_historical_done_from_active():
         def all_chunks(self): return rows
     class Corpus:
         def active(self): return snapshot
+        def _path(self, *args):
+            from types import SimpleNamespace
+            return SimpleNamespace(exists=lambda: True)
     service = KnowledgeService(Repository(), None, None, None, corpus=Corpus())
     status = service.status()
     assert status['done'] == 2 and status['active'] == 1 and status['history'] == 1
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_review_application_invokes_publication_only_after_receipt(review_harness):
     from tests.support.reviews import prepared_new_group, queued_approval, make_application, confirmed_target
     harness = review_harness

@@ -10,7 +10,7 @@ class TestBudget:
 
 
 class FakeEmbedding:
-    def embed(self,texts,*,deadline=None):
+    def embed(self,texts,*,deadline=None,retries=None):
         result=[]
         for text in texts:
             vector=[0.0]*1024
@@ -27,9 +27,10 @@ class FakeEmbedding:
 def service(test_database,tmp_path):
     from retailq.knowledge.service import KnowledgeService
     from retailq.knowledge.repository import KnowledgeRepository
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from tests.support.standalone_legacy import MilvusKnowledgeStore
     from tests.test_knowledge_vectors import identity
-    with MilvusKnowledgeStore(tmp_path/'knowledge.db',identity()) as vectors:
-        instance=KnowledgeService(KnowledgeRepository(test_database),FakeEmbedding(),vectors,TestBudget(),min_score=0.2)
+    repository=KnowledgeRepository(test_database)
+    with MilvusKnowledgeStore(tmp_path/'knowledge.db',identity(),repository=repository) as vectors:
+        instance=KnowledgeService(repository,FakeEmbedding(),vectors,TestBudget(),min_score=0.2)
         instance.import_faq();instance.vectorize_pending()
         yield instance

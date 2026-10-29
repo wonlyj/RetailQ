@@ -1,4 +1,5 @@
 import pytest
+import sys
 import retailq.knowledge.models  # Load all six mappings even in isolated tests.
 import retailq.knowledge.rag_models  # Register chapter-four mappings for schema checks.
 
@@ -9,6 +10,27 @@ from tests.support.milvus import standalone_store_settings
 @pytest.fixture
 def anyio_backend():
     return "asyncio"
+
+
+@pytest.fixture(autouse=True)
+def clean_owned_standalone_collections():
+    module = sys.modules.get('tests.support.standalone_legacy')
+    before = set(module.CREATED) if module else set()
+    yield
+    module = sys.modules.get('tests.support.standalone_legacy')
+    if module is None: return
+    created = module.CREATED - before
+    if not created: return
+    from pymilvus import MilvusClient
+    from tests.support.milvus import require_isolated_milvus
+    client = MilvusClient(module.URI)
+    try:
+        for name in created:
+            require_isolated_milvus(module.URI, name)
+            if client.has_collection(name): client.drop_collection(name)
+    finally:
+        client.close()
+        module.CREATED.difference_update(created)
 
 
 @pytest.fixture(autouse=True)
@@ -27,5 +49,6 @@ def clean_environment(monkeypatch):
         "MILVUS_URI", "MILVUS_COLLECTION_PREFIX", "KNOWLEDGE_QUERY_TIMEOUT_SECONDS",
         "RERANK_BASE_URL", "RERANK_API_KEY", "RERANK_PROXY", "RERANK_MODEL",
         "RERANK_TIMEOUT_SECONDS", "RAG_CONFIDENCE_PATH",
+        "RERANK_REUSE_EMBEDDING_KEY",
     ):
         monkeypatch.delenv(key, raising=False)

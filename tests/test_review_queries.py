@@ -14,7 +14,7 @@ from tests.support.reviews import (
     make_queries, make_application,
 )
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone]
 
 
 def test_prepared_is_not_a_confirmed_destination(review_harness, monkeypatch):

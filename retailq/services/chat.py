@@ -102,7 +102,7 @@ class ChatService:
                 status = {'tool_call_id':call['id'],'name':call['name']}
                 yield ChatEvent('tool_status',{**status,'status':'running'})
                 outcome = await turn.registry.execute(call)
-                if call['name'] == 'query_faq' and getattr(self.repository, 'rag_retrieve', None) is not None:
+                if call['name'] == 'query_faq' and (getattr(self.repository, 'rag_retrieve', None) is not None or getattr(self.repository, 'rag_required', False)):
                     if not outcome.payload['ok']:
                         raise ServiceError(outcome.payload['error']['code'],503,outcome.payload['error']['message'])
                     async for event in self._rag_answer(turn, call, outcome):

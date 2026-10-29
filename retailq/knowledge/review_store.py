@@ -7,6 +7,7 @@ import re
 import tempfile
 from threading import RLock
 from typing import Callable
+from contextlib import contextmanager
 
 from pydantic import ValidationError
 
@@ -20,11 +21,40 @@ def review_error(code='knowledge_review_conflict', message='审核记录不一�
     return ServiceError(code, status, message)
 
 
+class AuditLock:
+    def __init__(self, coordinator=None):
+        local_lock = RLock()
+        @contextmanager
+        def shared_lock():
+            if coordinator is None:
+                with local_lock:
+                    yield
+            else:
+                with coordinator.short_lock('audit'):
+                    with local_lock:
+                        yield
+        class Lock:
+            def __init__(self):
+                from threading import local
+                self._contexts = local()
+            def __enter__(self):
+                contexts = self._contexts
+                stack = getattr(contexts, 'stack', [])
+                cm = shared_lock(); cm.__enter__(); stack.append(cm); contexts.stack = stack
+                return self
+            def __exit__(self, *args):
+                return self._contexts.stack.pop().__exit__(*args)
+        self._lock = Lock()
+
+    def __enter__(self): return self._lock.__enter__()
+    def __exit__(self, *args): return self._lock.__exit__(*args)
+
+
 class ReviewStore:
-    def __init__(self, root: Path, *, clock: Callable[[], datetime]):
+    def __init__(self, root: Path, *, clock: Callable[[], datetime], coordinator=None):
         self.root = Path(root).resolve()
         self.clock = clock
-        self._lock = RLock()
+        self._lock = AuditLock(coordinator)
 
     def timestamp(self):
         from datetime import timezone, timedelta

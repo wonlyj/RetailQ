@@ -10,7 +10,7 @@ from retailq.models import Message
 from retailq.knowledge.review_contracts import DecisionCommand, PrepareCommand, ResumeCommand, SealCommand, evolve
 from tests.support.reviews import RID, job_env, review_harness
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite, pytest.mark.anyio]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone, pytest.mark.anyio]
 
 
 async def entered(env):
@@ -119,7 +119,7 @@ async def test_waiting_review_releases_maintenance_and_sql(job_env):
 
 
 async def test_faq_reads_while_model_waits_without_opening_another_lite(job_env, monkeypatch):
-    import retailq.knowledge.vectors as vectors
+    import tests.support.standalone_legacy as vectors
     env = job_env
     def forbidden(*args, **kwargs):
         raise AssertionError('a second Milvus client must not be opened')

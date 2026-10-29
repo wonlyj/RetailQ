@@ -8,7 +8,6 @@ import uuid
 from retailq.errors import ServiceError
 from retailq.knowledge.embedding import SiliconFlowEmbedding
 from retailq.knowledge.markdown import load_manifest
-from retailq.knowledge.ownership import DirectoryOwner
 from retailq.knowledge.qa_gateway import OpenAIQAGateway
 from retailq.knowledge.repository import KnowledgeRepository
 from retailq.knowledge.service import KnowledgeService
@@ -21,15 +20,16 @@ from retailq.knowledge.review_contracts import (
 from retailq.knowledge.review_preparation import ReviewPreparation, processed_sources
 from retailq.knowledge.review_queries import ReviewQueries
 from retailq.knowledge.review_repository import ReviewRepository
-from retailq.knowledge.review_store import ReviewStore, review_error
+from retailq.knowledge.review_store import AuditLock, ReviewStore, review_error
 
 
 class MaintenanceLease:
     """One actual maintenance operation, counted until its real thread leaves."""
-    def __init__(self, runtime, operation_id=None, run_id=None):
+    def __init__(self, runtime, operation_id=None, run_id=None, process_lease=None):
         self.runtime, self.operation_id, self.run_id = runtime, operation_id, run_id
         self.stop = threading.Event()
         self.done = threading.Event()
+        self.process_lease = process_lease
 
     def close(self):
         with self.runtime._admission:
@@ -37,6 +37,7 @@ class MaintenanceLease:
                 return
             self.runtime._leases.discard(self)
             self.runtime._maintenance.release()
+            if self.process_lease is not None: self.process_lease.close()
             with self.runtime._condition:
                 self.runtime._active -= 1
                 self.runtime._condition.notify_all()
@@ -50,19 +51,20 @@ class Admission:
 
 
 class KnowledgeRuntime:
-    def __init__(self,service,owner,*,settings,embedding=None,vectors=None,gateway=None):
+    def __init__(self,service,owner,*,settings,embedding=None,vectors=None,gateway=None,coordinator=None):
         self.service,self.owner,self.settings=service,owner,settings
         self.root=owner.root
         self.embedding,self.vectors,self.gateway=embedding,vectors,gateway
+        self.coordinator=coordinator
         self._condition=threading.Condition()
         self._active=0;self._closing=False;self._closed=False
         self._read_slots=threading.BoundedSemaphore(2)
         self._maintenance=threading.Lock()
-        self._admission=threading.RLock()
+        self._admission=AuditLock(coordinator)
         self._leases=set()
         self._review_closing=False
         self._pending_seal=None
-        self.review_store=ReviewStore(self.root,clock=lambda:datetime.now(timezone(timedelta(hours=8))))
+        self.review_store=ReviewStore(self.root,clock=lambda:datetime.now(timezone(timedelta(hours=8))),coordinator=coordinator)
         self.review_repository=ReviewRepository(service.repository)
         self.review_application=ReviewApplication(service.repository,self.review_repository,self.review_store,service)
         self.review_queries=ReviewQueries(self.review_repository,service.repository,self.review_store,self.root/'runs')
@@ -70,7 +72,13 @@ class KnowledgeRuntime:
             input_budget=settings.input_budget,min_score=settings.knowledge_dedup_min_score,
             candidate_k=settings.knowledge_dedup_candidate_k)
         self.review_preparation=self._preparer if gateway is not None else None
-        self._mark_interrupted()
+        if coordinator is None:
+            self._mark_interrupted()
+        else:
+            lease=coordinator.try_acquire('maintenance')
+            if lease is not None:
+                try:self._mark_interrupted()
+                finally:lease.close()
 
     @property
     def can_prepare_review(self):
@@ -90,27 +98,52 @@ class KnowledgeRuntime:
         return self.review_store.put_operation(evolve(current,phase=phase,error=error),expected_revision=current.revision)
 
     @classmethod
-    def open(cls,settings,database):
+    def open(cls,settings,database,*,coordinator=None):
         if not settings.is_knowledge_configured:
             raise ServiceError('knowledge_not_configured',503,'请配置知识库数据库与独立嵌入服务。')
         try:
             with ExitStack() as stack:
-                owner=stack.enter_context(DirectoryOwner(Path(settings.knowledge_data_dir)))
-                verify_tokenizer(Path(settings.knowledge_tokenizer_path))
-                budget=BGETokenBudget(Path(settings.knowledge_tokenizer_path))
+                from retailq.coordination import Coordinator
+                from retailq.knowledge.active_vectors import ActiveVectors
+                from retailq.knowledge.corpus import CorpusStore
+                from retailq.knowledge.corpus_import import CorpusImporter, ReviewApprovalResolver
+                from retailq.knowledge.indexing import IndexBuilder
+                from retailq.knowledge.milvus_store import MilvusKnowledgeStore
+                from retailq.knowledge.query_gateway import QueryGateway
+                tokenizer_path=Path(settings.knowledge_tokenizer_path)
+                if not tokenizer_path.is_absolute():tokenizer_path=Path(__file__).resolve().parents[2]/tokenizer_path
+                verify_tokenizer(tokenizer_path)
+                budget=BGETokenBudget(tokenizer_path)
+                coordinator=coordinator or Coordinator.for_settings(settings)
+                root=Path(coordinator.identity['knowledge_root'])
+                root.mkdir(parents=True,exist_ok=True)
+                class Owner:
+                    def __init__(self, path): self.root=path
+                    def __exit__(self,*args): pass
+                owner=Owner(root)
                 embedding=stack.enter_context(SiliconFlowEmbedding(settings,budget))
-                # PyMilvus loads .env at import; never import it in disabled mode.
-                from retailq.knowledge.vectors import MilvusKnowledgeStore
                 identity={'provider':'siliconflow','model':settings.embedding_model,'endpoint':settings.embedding_base_url.rstrip('/'),
                     'dimension':'1024','metric':'COSINE','text_template_version':'1','normalization_version':'l2-v1',
-                    'tokenizer_revision':TOKENIZER_REVISION,'tokenizer_sha256':TOKENIZER_SHA256,'schema_version':'1'}
-                vectors=stack.enter_context(MilvusKnowledgeStore(owner.root/'knowledge.db',identity))
+                    'tokenizer_revision':TOKENIZER_REVISION,'tokenizer_sha256':TOKENIZER_SHA256,'schema_version':'2-bm25-chinese'}
+                corpus=CorpusStore(root,coordinator)
+                vectors=ActiveVectors(settings.milvus_uri,identity,corpus)
                 repository=KnowledgeRepository(database)
                 service=KnowledgeService(repository,embedding,vectors,budget,top_k=settings.knowledge_top_k,min_score=settings.knowledge_min_score,
                     batch_size=settings.embedding_batch_size,query_timeout_seconds=settings.tool_timeout_seconds,
-                    chunk_target_chars=settings.knowledge_chunk_target,chunk_overlap_chars=settings.knowledge_chunk_overlap)
+                    chunk_target_chars=settings.knowledge_chunk_target,chunk_overlap_chars=settings.knowledge_chunk_overlap,corpus=corpus)
                 gateway=stack.enter_context(OpenAIQAGateway(settings)) if settings.is_ready else None
-                instance=cls(service,owner,settings=settings,embedding=embedding,vectors=vectors,gateway=gateway)
+                query_gateway=QueryGateway(settings) if settings.is_ready else None
+                if query_gateway is not None:stack.callback(query_gateway.close)
+                instance=cls(service,owner,settings=settings,embedding=embedding,vectors=vectors,gateway=gateway,coordinator=coordinator)
+                importer=CorpusImporter(repository,corpus,budget,approval_resolver=ReviewApprovalResolver(instance.review_store,instance.review_repository),
+                                        collection_prefix=settings.milvus_collection_prefix)
+                builder=IndexBuilder(repository,corpus,importer,coordinator,embedding,
+                    lambda name:MilvusKnowledgeStore(settings.milvus_uri,identity,collection=name))
+                instance.corpus,instance.importer,instance.index_builder,instance.query_gateway=corpus,importer,builder,query_gateway
+                service.index_builder=builder
+                service.maintenance_held=True
+                service.retrieve_proxy=instance.retrieve
+                instance.review_queries.corpus=corpus
                 stack.pop_all()
                 return instance
         except ServiceError:raise
@@ -128,9 +161,41 @@ class KnowledgeRuntime:
                 self._active-=1;self._condition.notify_all()
 
     def search_faq(self,keyword):
+        if hasattr(self, 'corpus'):
+            from retailq.knowledge.service import complete_excerpt
+            result=self.retrieve(keyword)
+            return [{'id':item.id,'question':item.draft.questions,'answer':complete_excerpt(item.draft.answer),
+                     'category':item.draft.category} for item in result.candidates]
         if not self._read_slots.acquire(blocking=False):raise ServiceError('knowledge_busy',503,'知识查询繁忙，请稍后重试。')
         try:
             with self._operation():return self.service.search_faq(keyword)
+        finally:self._read_slots.release()
+
+    def retrieve(self, question, *, strategy='hybrid_rerank', category=None, category_prefix=None, content_type=None):
+        import json, time
+        from retailq.knowledge.query import QueryNormalizer
+        from retailq.knowledge.retrieval import RetrievalEngine
+        from retailq.knowledge.retrieval_contracts import RetrievalFilters
+        from retailq.knowledge.rerank import Reranker
+        if not self._read_slots.acquire(blocking=False):raise ServiceError('knowledge_busy',503,'知识查询繁忙，请稍后重试。')
+        try:
+            with self._operation():
+                deadline=time.monotonic()+self.settings.knowledge_query_timeout_seconds
+                snapshot=self.corpus.active()
+                if self.query_gateway is None:raise ServiceError('model_not_configured',503,'请配置问题归一模型。')
+                path=Path(__file__).resolve().parents[2]/'examples/knowledge/synonyms.json'
+                synonyms=json.loads(path.read_text(encoding='utf-8'))['terms']
+                understood=QueryNormalizer(self.query_gateway.normalize,synonyms).understand(question,deadline=deadline)
+                reranker=None
+                try:
+                    if strategy=='hybrid_rerank':
+                        reranker=Reranker(self.settings.rerank_base_url,self.settings.effective_rerank_key,
+                                          proxy=self.settings.rerank_proxy.get_secret_value(),timeout_seconds=self.settings.rerank_timeout_seconds)
+                    with self.vectors.open(snapshot.collection) as store:
+                        engine=RetrievalEngine(self.service.repository,self.embedding,store,reranker)
+                        return engine.retrieve(understood,snapshot,strategy,RetrievalFilters(category,content_type,category_prefix),deadline=deadline)
+                finally:
+                    if reranker is not None:reranker.close()
         finally:self._read_slots.release()
 
     def _reserve(self, operation_id=None, run_id=None, *, seal=False):
@@ -141,8 +206,16 @@ class KnowledgeRuntime:
                 raise review_error('knowledge_job_busy','终止请求正在等待安全边界，请稍后重试。')
             if not self._maintenance.acquire(blocking=False):
                 raise review_error('knowledge_job_busy','另一个知识维护任务正在执行。')
+            try:
+                process_lease = self.coordinator.try_acquire('maintenance') if self.coordinator else None
+            except BaseException:
+                self._maintenance.release()
+                raise
+            if self.coordinator and process_lease is None:
+                self._maintenance.release()
+                raise review_error('knowledge_job_busy','另一个知识维护任务正在执行。')
             self._active+=1
-            lease=MaintenanceLease(self,operation_id,run_id)
+            lease=MaintenanceLease(self,operation_id,run_id,process_lease)
             self._leases.add(lease)
             return lease
 
@@ -228,6 +301,10 @@ class KnowledgeRuntime:
         with self._admission:
             existing=self._known_operation(command)
             run_id=command.request_key if isinstance(command,PrepareCommand) else command.run_id
+            if self.coordinator is not None and not isinstance(command,SealCommand):
+                if any(op.kind=='seal' and op.phase in ('queued','running') and
+                       not self.review_store.get_seal(op.run_id) for op in self.review_store.list_operations()):
+                    raise review_error('knowledge_job_busy','终止请求正在等待安全边界。')
             if self.review_store.get_seal(run_id):
                 if isinstance(command,SealCommand) and existing:
                     return Admission(existing,None)
@@ -241,6 +318,10 @@ class KnowledgeRuntime:
                 if (existing.reused_operation_id or existing.phase in ('succeeded','failed','sealed') or
                         any(l.operation_id==existing.operation_id for l in self._leases)):
                     return Admission(existing,None)
+                if self.coordinator is not None and existing.phase=='running':
+                    probe=self.coordinator.try_acquire('maintenance')
+                    if probe is None: return Admission(existing,None)
+                    probe.close()
                 lease=self._reserve(existing.operation_id,run_id,seal=isinstance(command,SealCommand))
                 return Admission(existing,lease)
             if isinstance(command,SealCommand):
@@ -350,6 +431,16 @@ class KnowledgeRuntime:
             operation=self.review_store.get_operation(operation_id)
             self._operation_phase(operation_id,'running')
             command=operation.command
+            if self.coordinator is not None and not isinstance(command,SealCommand):
+                runtime=self
+                local_stop=stop
+                class SharedStop:
+                    def is_set(self):
+                        if local_stop.is_set(): return True
+                        return any(op.kind=='seal' and op.run_id==operation.run_id and op.phase in ('queued','running')
+                                   for op in runtime.review_store.list_operations())
+                    def set(self): local_stop.set()
+                stop=SharedStop()
             if self.review_store.get_seal(operation.run_id) and not isinstance(command,SealCommand):
                 return self._operation_phase(operation_id,'sealed')
             if isinstance(command,SealCommand):
@@ -428,6 +519,14 @@ class KnowledgeRuntime:
         lease=self.reserve_maintenance()
         try:
             lease.stop=stop
+            if hasattr(self, 'corpus') and action in ('prepare-corpus','import') and not options.get('faq'):
+                build_id=options.get('build_id') or uuid.uuid4().hex
+                plan=self.importer.prepare(Path(options['manifest']),operation_id=build_id)
+                return {'build_id':plan.build_id,'phase':plan.phase,'expected':len(plan.active_ids)}
+            if hasattr(self, 'corpus') and action=='build-index':
+                return asdict(self.index_builder.build(self.corpus.get_plan(options['build_id']),stop=stop,_held=True))
+            if hasattr(self, 'corpus') and action=='publish-index':
+                return asdict(self.index_builder.publish(options['build_id'],_held=True))
             if action=='import':
                 ids=self.service.import_faq() if options.get('faq') else self.service.import_documents(load_manifest(Path(options['manifest'])))
                 return {'imported_ids':ids,**self.service.status()}
@@ -446,7 +545,7 @@ class KnowledgeRuntime:
             while self._active:self._condition.wait()
         failed=False
         try:
-            for resource in [self.gateway,self.vectors,self.embedding]:
+            for resource in [getattr(self,'query_gateway',None),self.gateway,self.vectors,self.embedding]:
                 if resource is not None:
                     try:resource.close()
                     except Exception:failed=True

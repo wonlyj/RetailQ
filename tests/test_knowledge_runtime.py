@@ -104,16 +104,20 @@ def test_disabled_or_missing_config_reports_not_ready(tmp_path):
     assert not (tmp_path/'new').exists()
 
 
-def test_open_failure_releases_directory_and_clients(tmp_path):
+def test_open_failure_releases_directory_and_clients(tmp_path, monkeypatch):
     from retailq.knowledge.runtime import KnowledgeRuntime
     from retailq.knowledge.ownership import DirectoryOwner
+    from retailq.coordination import Coordinator
+    attempted=[]
+    monkeypatch.setattr(Coordinator, 'for_settings', classmethod(lambda cls, settings: attempted.append(True)))
     settings=Settings(_env_file=None,knowledge_enabled=True,mysql_password='test',embedding_api_key='test',knowledge_data_dir=str(tmp_path),knowledge_tokenizer_path=str(tmp_path/'missing.json'))
     with pytest.raises(ServiceError):KnowledgeRuntime.open(settings,None)
+    assert attempted == []
     with DirectoryOwner(tmp_path):pass
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_stop_between_batches_leaves_recoverable_pending(service):
     from retailq.knowledge.contracts import ChunkDraft
     service.repository.import_chunks([ChunkDraft('知识','问','答案。','stop1','manual'),ChunkDraft('知识','问','另一个答案。','stop2','manual')])

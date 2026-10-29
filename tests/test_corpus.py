@@ -4,7 +4,7 @@ import pytest
 
 from retailq.coordination import Coordinator, RuntimeIdentity
 from retailq.errors import ServiceError
-from retailq.knowledge.corpus import CorpusPlan, CorpusSnapshot, CorpusStore, is_active
+from retailq.knowledge.corpus import CorpusPlan, CorpusSnapshot, CorpusSource, CorpusStore, is_active
 from retailq.knowledge.contracts import ChunkDraft, ChunkRecord
 from retailq.knowledge.text import content_fingerprint
 
@@ -54,6 +54,27 @@ def test_build_cannot_skip_phases_or_replace_identity(tmp_path):
         corpus.update(replace(plan, phase='verified'), expected_phase='prepared')
     with pytest.raises(ServiceError):
         corpus.update(replace(plan, phase='sql_committed', collection='knowledge_other'), expected_phase='prepared')
+
+
+def test_corrupt_empty_source_range_is_reported_as_corpus_error(tmp_path):
+    from hashlib import sha256
+    import json
+
+    corpus = store(tmp_path)
+    key, digest = 'source.md', 'd' * 64
+    source = CorpusSource(key, digest, 'faq', 'demo', (),
+                          f'sources/{sha256(key.encode()).hexdigest()}/{digest}.md',
+                          (7,), ((7, 1, 2),))
+    plan = CorpusPlan('a' * 32, 0, 'knowledge_a', 'b' * 64, (source,),
+                      (7,), (), ((7, 'c' * 64),), 'prepared')
+    corpus.stage(plan)
+    path = corpus._path('builds', plan.build_id + '.json')
+    data = json.loads(path.read_text(encoding='utf-8'))
+    data['sources'][0]['line_ranges'] = [[]]
+    path.write_text(json.dumps(data), encoding='utf-8')
+    with pytest.raises(ServiceError) as exc:
+        corpus.get_plan(plan.build_id)
+    assert exc.value.code == 'knowledge_corpus_invalid'
 
 
 def test_publish_recovers_if_active_written_before_build_record(tmp_path, monkeypatch):

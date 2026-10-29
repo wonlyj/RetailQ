@@ -12,7 +12,7 @@ from tests.support.reviews import (
     review_harness, seed_new_group, approve, reject, group_batch_ids, seed_closed_source, vector_count,
 )
 
-pytestmark = [pytest.mark.mysql, pytest.mark.lite]
+pytestmark = [pytest.mark.mysql, pytest.mark.standalone]
 
 
 def with_prepared(group, decision, prepared):

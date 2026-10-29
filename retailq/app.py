@@ -40,7 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise RuntimeError("应用配置无效，请检查 .env 配置。") from None
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        gateway=database=knowledge=scheduler=service=jobs=None
+        gateway=database=knowledge=scheduler=service=jobs=rag_gateway=None
         application.state.knowledge_failure=None
         try:
             gateway = OpenAIModelGateway(settings) if settings.is_ready else None
@@ -62,7 +62,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.knowledge_runtime=knowledge
             application.state.knowledge_scheduler=scheduler
             application.state.review_jobs=jobs
-            service = ChatService(ChatRepository(database,faq_search=knowledge.search_faq if knowledge else None),gateway,settings) if database and gateway else None
+            if database and gateway:
+                repository=ChatRepository(database,faq_search=knowledge.search_faq if knowledge else None)
+                repository.rag_required=settings.knowledge_enabled
+                if knowledge is not None:
+                    from retailq.knowledge.rag_gateway import OpenAIRAGGateway
+                    from retailq.knowledge.rag_repository import RAGRepository
+                    from retailq.knowledge.policy import DynamicConfidencePolicy
+                    repository.rag_retrieve=knowledge.retrieve
+                    rag_gateway=OpenAIRAGGateway(settings)
+                    service=ChatService(repository,gateway,settings,rag_gateway=rag_gateway,
+                                        rag_repository=RAGRepository(database),confidence_policy=DynamicConfidencePolicy(settings),
+                                        coordinator=knowledge.coordinator)
+                else:
+                    service=ChatService(repository,gateway,settings)
             application.state.chat_service = service
             if scheduler is not None:scheduler.start()
             yield
@@ -86,6 +99,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 finally:
                                     if gateway is not None:
                                         with anyio.move_on_after(5,shield=True):await gateway.aclose()
+                                    if rag_gateway is not None:
+                                        with anyio.move_on_after(5,shield=True):await rag_gateway.aclose()
 
     application = FastAPI(title="RetailQ", version="0.3.0", lifespan=lifespan)
     application.state.settings = settings

@@ -11,7 +11,7 @@ from retailq.knowledge.repository import KnowledgeRepository
 from retailq.knowledge.text import content_fingerprint,embedding_text,normalize_text
 from retailq.knowledge.token_budget import BGETokenBudget
 if TYPE_CHECKING:
-    from retailq.knowledge.vectors import MilvusKnowledgeStore
+    from retailq.knowledge.milvus_store import MilvusKnowledgeStore
 
 
 def complete_excerpt(answer: str,maximum: int=1200) -> str:
@@ -69,6 +69,9 @@ class KnowledgeService:
         result={'chunks':len(rows),'pending':sum(r.vectorize_status=='pending' for r in rows),'done':sum(r.vectorize_status=='done' for r in rows)}
         if self.corpus is not None:
             from retailq.knowledge.corpus import is_active
+            if not self.corpus._path('active.json').exists():
+                result.update(active=0,history=len(rows),active_pending=0)
+                return result
             snapshot=self.corpus.active()
             result.update(active=sum(is_active(row,snapshot) for row in rows),
                           history=sum(not is_active(row,snapshot) for row in rows),
@@ -149,6 +152,11 @@ class KnowledgeService:
         return missing
 
     def search_faq(self,keyword: str) -> list[dict]:
+        proxy=getattr(self,'retrieve_proxy',None)
+        if proxy is not None:
+            result=proxy(keyword)
+            return [{'id':item.id,'question':item.draft.questions,'answer':complete_excerpt(item.draft.answer),
+                     'category':item.draft.category} for item in result.candidates]
         if self.retrieval_engine is not None:
             result=self.retrieve(keyword)
             return [{'id':item.id,'question':item.draft.questions,'answer':complete_excerpt(item.draft.answer),

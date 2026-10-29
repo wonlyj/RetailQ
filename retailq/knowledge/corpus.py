@@ -88,10 +88,10 @@ def _validate(plan: CorpusPlan) -> None:
             raise corpus_error('语料来源不符合清单。')
         source_ids.extend(source.chunk_ids)
         if (len(source.chunk_ids) != len(set(source.chunk_ids))
-                or {row[0] for row in source.line_ranges} != set(source.chunk_ids)
                 or len(source.line_ranges) != len(source.chunk_ids)
                 or any(len(row) != 3 or any(type(x) is not int for x in row)
-                       or row[1] < 1 or row[2] < row[1] for row in source.line_ranges)):
+                       or row[1] < 1 or row[2] < row[1] for row in source.line_ranges)
+                or {row[0] for row in source.line_ranges} != set(source.chunk_ids)):
             raise corpus_error('语料来源行范围不一致。')
     if (len(source_ids) != len(set(source_ids)) or set(source_ids) & set(plan.approved_ids)
             or set(source_ids) | set(plan.approved_ids) != set(ids)):

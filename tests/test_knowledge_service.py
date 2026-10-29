@@ -6,7 +6,7 @@ from retailq.knowledge.contracts import ChunkDraft,VectorItem
 from retailq.knowledge.models import KnowledgeChunk
 from tests.support.knowledge import service,FakeEmbedding
 
-pytestmark=[pytest.mark.mysql,pytest.mark.lite]
+pytestmark=[pytest.mark.mysql,pytest.mark.standalone]
 
 
 def test_pending_is_committed_before_embedding(service):

@@ -138,6 +138,21 @@ def run_case(output, stage, decision, embedding_mode):
             if child.poll() is None:
                 child.kill()
                 child.wait(timeout=20)
+        # The collection name is derived solely from this newly created case.
+        from pymilvus import MilvusClient
+        from tests.support.standalone_legacy import URI, collection_for
+        from tests.support.milvus import require_isolated_milvus
+        collection = collection_for(case / 'knowledge' / 'knowledge.db')
+        require_isolated_milvus(URI, collection)
+        try:
+            client = MilvusClient(URI)
+            try:
+                if client.has_collection(collection): client.drop_collection(collection)
+            finally:
+                client.close()
+        except Exception:
+            report['passed'] = False
+            report['cleanup_error'] = 'isolated test collection cleanup failed'
         write_json(case / 'report.json', report)
     return report
 

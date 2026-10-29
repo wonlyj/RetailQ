@@ -82,7 +82,13 @@ class ReviewJobs:
     async def _finish_seal(self, command):
         for lease in self.runtime.active_leases():
             await asyncio.to_thread(lease.done.wait)
-        admission=await asyncio.to_thread(self.runtime.admit_review,command)
+        while True:
+            try:
+                admission=await asyncio.to_thread(self.runtime.admit_review,command)
+                break
+            except ServiceError as exc:
+                if exc.code != 'knowledge_job_busy' or self._closing: raise
+                await asyncio.sleep(.1)
         if admission.lease:
             # Keep the async owner until the synchronous thread has really left.
             return await asyncio.to_thread(self.runtime.execute_review,command.request_key,

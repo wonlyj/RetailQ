@@ -1,4 +1,4 @@
-"""Isolated browser fixture: real app/runtime/MySQL/Lite, deterministic external models."""
+"""Isolated browser fixture: real app/runtime/MySQL/Standalone, deterministic external models."""
 import argparse
 import asyncio
 from contextlib import asynccontextmanager, contextmanager
@@ -14,7 +14,7 @@ from retailq.errors import ServiceError
 
 ROOT = Path(__file__).resolve().parents[2]
 EVIDENCE = ROOT / 'artifacts' / 'verification' / 'ch03-review'
-SHIPPING = '演示规则：普通配送订单满99元免运费，不满99元收取8元运费；偏远地区及特殊商品以平台结算页为准。'
+SHIPPING = '演示规则：普通配送订单满99元免运费，不满99元收取10元运费；偏远地区及特殊商品以平台结算页为准。'
 EBOOK = '演示规则：可在商品详情页的资料下载入口查看电子说明书，具体以页面提供的资料为准。'
 BIG_ANSWER = '演示规则：大ID指针用于本地验收。'
 
@@ -36,6 +36,9 @@ def create_fixture_app(settings, output, *, delay=0.0, scenario='normal', batch_
     from retailq.knowledge.review_contracts import CategorySuggestion
     from tests.support.knowledge import FakeEmbedding
     from tests.support.reviews import ReviewGateway
+    from retailq.coordination import Coordinator, RuntimeIdentity
+    coordinator = Coordinator(output/'locks', RuntimeIdentity('127.0.0.1',3307,'retailq_test',settings.milvus_uri,Path(settings.knowledge_data_dir)))
+    Coordinator.for_settings = classmethod(lambda cls, config: coordinator)
 
     class ChatGateway:
         def __init__(self, settings):
@@ -99,7 +102,19 @@ def create_fixture_app(settings, output, *, delay=0.0, scenario='normal', batch_
                         if scenario != 'unready' else {'scenario':'unready'})
             (output / 'fixture-manifest.json').write_text(json.dumps({
                 'embedding_mode':'deterministic-test','chat_mode':'fixture',**manifest},ensure_ascii=False,indent=2),encoding='utf-8')
-            yield
+            try:
+                yield
+            finally:
+                if app.state.knowledge_runtime is not None:
+                    from pymilvus import MilvusClient
+                    from tests.support.milvus import require_isolated_milvus
+                    milvus=MilvusClient(settings.milvus_uri)
+                    try:
+                        for path in (Path(settings.knowledge_data_dir)/'corpus'/'builds').glob('*.json'):
+                            plan=app.state.knowledge_runtime.corpus.get_plan(path.stem)
+                            require_isolated_milvus(settings.milvus_uri,plan.collection)
+                            if milvus.has_collection(plan.collection):milvus.drop_collection(plan.collection)
+                    finally:milvus.close()
     application.router.lifespan_context = seeded
     return application
 
@@ -113,12 +128,25 @@ def seed_fixture(runtime, *, scenario='normal'):
     lease = runtime.reserve_maintenance()
     try:
         database = runtime.service.repository.database
-        runtime.service.repository.import_chunks([ChunkDraft('配送规则','普通配送怎么收费？',SHIPPING,None,'faq'),
-                                                  ChunkDraft('售后手册','保养说明','演示规则：避免暴晒，阴凉晾干。',None,'manual')])
+        initial=runtime.service.repository.import_chunks([ChunkDraft('配送规则','普通配送怎么收费？',SHIPPING,None,'faq'),
+                                                          ChunkDraft('售后手册','保养说明','演示规则：避免暴晒，阴凉晾干。',None,'manual')])
         with database.sessions.begin() as session:
             session.add(KnowledgeChunk(id=9007199254740993, category='验收专用', questions='大ID知识的原始问题',
                                        answer=BIG_ANSWER,content_type='faq',vectorize_status='pending'))
-        runtime.service.vectorize_pending()
+        initial.append(9007199254740993)
+        from dataclasses import replace
+        from retailq.knowledge.corpus import CorpusPlan
+        from retailq.knowledge.text import content_fingerprint
+        resolver=runtime.importer.approval_resolver
+        runtime.importer.approval_resolver=lambda:tuple(sorted(set(initial)|set(resolver())))
+        rows=runtime.service.repository.get_chunks(initial)
+        build_id=uuid.uuid4().hex
+        plan=CorpusPlan(build_id,0,'test_'+build_id,'',(),tuple(initial),(),
+                        tuple(sorted((i,content_fingerprint(rows[i].draft)) for i in initial)), 'prepared', tuple(initial))
+        runtime.corpus.stage(plan)
+        plan=runtime.importer.resume(build_id)
+        runtime.index_builder.build(plan,stop=threading.Event(),_held=True)
+        runtime.index_builder.publish(build_id,_held=True)
         if scenario == 'empty':
             return {'sources':{},'initial_chunks':3,'scenario':'empty'}
         cases = [
@@ -167,6 +195,7 @@ def main(argv=None):
     settings = Settings(_env_file=None,mysql_host='127.0.0.1',mysql_port=3307,mysql_database='retailq_test',
         mysql_user=local.mysql_user,mysql_password=local.mysql_password,knowledge_enabled=args.scenario != 'unready',
         knowledge_schedule_enabled=False,knowledge_data_dir=str(Path(args.output).resolve() / 'knowledge'),
+        milvus_uri='http://127.0.0.1:19531',milvus_collection_prefix='test',
         knowledge_tokenizer_path=str(ROOT / 'artifacts/knowledge/assets/tokenizer.json'),embedding_api_key='fixture',
         openai_base_url='http://fixture.invalid/v1',openai_api_key='fixture',openai_model='deterministic-test',context_window_tokens=31536)
     output = validate_console_scope(settings,args.output)

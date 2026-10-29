@@ -47,7 +47,7 @@ def test_similar_different_region_or_threshold_is_not_merged():
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_equivalent_existing_chunk_discards_staging_without_new_row(service):
     from retailq.knowledge.dedup import global_dedup
     existing=service.repository.all_chunks()[0]
@@ -60,7 +60,7 @@ def test_equivalent_existing_chunk_discards_staging_without_new_row(service):
 
 
 @pytest.mark.mysql
-@pytest.mark.lite
+@pytest.mark.standalone
 def test_group_commit_updates_staging_and_pending_atomically(service):
     staged=service.repository.stage('batch',[QAProposal('s',r.question,r.answer,r.answer) for r in rows()])
     group=DedupGroup(tuple(r.id for r in staged),staged[0].id,None,tuple(r.question for r in staged))

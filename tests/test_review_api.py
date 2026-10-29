@@ -1,4 +1,4 @@
-"""Real app/runtime/SQL/Lite; only external model providers are substituted."""
+"""Real app/runtime/SQL/Standalone; external model providers are substituted."""
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
@@ -21,6 +21,9 @@ HEADERS = {'Origin':ORIGIN, 'X-RetailQ-Console':'1'}
 def api_env(test_database, tmp_path, monkeypatch):
     import retailq.app as module
     import retailq.knowledge.runtime as runtime_module
+    from retailq.coordination import Coordinator, RuntimeIdentity
+    from retailq.knowledge.query_gateway import QueryGateway
+    from retailq.knowledge.rerank import Reranker
     class Chat:
         def __init__(self, settings):
             pass
@@ -51,22 +54,47 @@ def api_env(test_database, tmp_path, monkeypatch):
     monkeypatch.setattr(module, 'OpenAIModelGateway', Chat)
     monkeypatch.setattr(runtime_module, 'SiliconFlowEmbedding', embedding)
     monkeypatch.setattr(runtime_module, 'OpenAIQAGateway', qa)
+    monkeypatch.setattr(QueryGateway, 'normalize', lambda self, question, deadline: question)
+    monkeypatch.setattr(Reranker, 'rerank', lambda self, query, candidates, *, deadline: candidates[:10])
+    coordinator = Coordinator(tmp_path/'locks', RuntimeIdentity('127.0.0.1',3307,'retailq_test','http://127.0.0.1:19531',tmp_path))
+    monkeypatch.setattr(Coordinator, 'for_settings', classmethod(lambda cls, settings: coordinator))
     local = Settings()
     settings = Settings(_env_file=None, mysql_port=3307, mysql_database='retailq_test',
         mysql_user=local.mysql_user, mysql_password=local.mysql_password, knowledge_enabled=True,
         knowledge_schedule_enabled=False, knowledge_data_dir=str(tmp_path),
+        milvus_uri='http://127.0.0.1:19531', milvus_collection_prefix='test',
+        rerank_api_key='fixture',
         knowledge_tokenizer_path=str(Path('artifacts/knowledge/assets/tokenizer.json').resolve()),
         embedding_api_key='test', openai_base_url='http://model.test/v1', openai_api_key='test',
         openai_model='deterministic-test', context_window_tokens=31536)
     application = module.create_app(settings)
     with TestClient(application, base_url=ORIGIN, client=('127.0.0.1',50000)) as client:
         runtime = application.state.knowledge_runtime
+        from dataclasses import replace
+        from retailq.knowledge.corpus import CorpusPlan
+        build_id = uuid.uuid4().hex
+        plan = CorpusPlan(build_id, 0, 'test_'+build_id, '', (), (), (), (), 'prepared')
+        runtime.corpus.stage(plan)
+        plan = replace(plan, phase='sql_committed')
+        runtime.corpus.update(plan, expected_phase='prepared')
+        runtime.index_builder.build(plan, stop=Event())
+        runtime.index_builder.publish(build_id)
         env = SimpleNamespace(client=client, app=application, runtime=runtime, database=test_database,
                               entered=entered, release=release, root=tmp_path)
         try:
             yield env
         finally:
             release.set()
+            from pymilvus import MilvusClient
+            from tests.support.milvus import require_isolated_milvus
+            milvus=MilvusClient('http://127.0.0.1:19531')
+            try:
+                for path in (tmp_path/'corpus'/'builds').glob('*.json'):
+                    plan=runtime.corpus.get_plan(path.stem)
+                    require_isolated_milvus('http://127.0.0.1:19531',plan.collection)
+                    if milvus.has_collection(plan.collection):milvus.drop_collection(plan.collection)
+            finally:
+                milvus.close()
 
 
 def key():

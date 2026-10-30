@@ -88,6 +88,14 @@
     <div class="help-points"><p><strong>关于具体订单</strong><span>支持查询订单、物流和商品；当前返回随机演示数据，不代表真实业务情况。</span></p><p><strong>关于售后处理</strong><span>支持查询演示FAQ、创建待处理人工工单；不能代为退款、修改订单或即时接通人工。</span></p><p><strong>关于个人信息</strong><span>请勿发送密码或验证码。需要核实订单时，先提供订单号即可。</span></p></div>
     <button class="dialog-done" id="helpDone">知道了，开始咨询</button>
   </dialog>
+  <dialog class="source-dialog" id="sourceDialog" aria-labelledby="sourceTitle">
+    <div class="source-header"><div><span class="source-kicker">引用来源</span><h2 id="sourceTitle">来源详情</h2></div><button class="icon-button" id="closeSource" aria-label="关闭来源详情"><svg><use href="#i-close"/></svg></button></div>
+    <p class="source-path" id="sourcePath"></p>
+    <p class="source-label">引用的知识片段</p><div class="source-chunk" id="sourceChunk"></div>
+    <button class="source-original-button" id="showOriginal" type="button">查看原文位置</button>
+    <p class="source-error" id="sourceError" role="status" hidden></p>
+    <div class="source-document" id="sourceDocument" hidden><p class="source-label">来源原文</p><pre id="sourceOriginal"></pre></div>
+  </dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <div class="sr-only" id="announcer" aria-live="polite"></div>
 </body>

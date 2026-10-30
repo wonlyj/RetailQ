@@ -17,6 +17,24 @@
     sessionStorage.setItem(identityKey, userId);
   } catch { userId = `demo-${uid()}`; }
   const current = () => sessions.find((session) => session.id === activeId);
+  function validCitations(value) {
+    if (!Array.isArray(value) || value.length > 10) return [];
+    const numbers = new Set();
+    for (const item of value) {
+      if (!item || !Number.isInteger(item.number) || item.number < 1 || item.number > 10 || numbers.has(item.number) ||
+          typeof item.chunk_id !== 'string' || !/^[1-9]\d*$/.test(item.chunk_id) ||
+          typeof item.text !== 'string' || typeof item.section_path !== 'string' ||
+          typeof item.source_key !== 'string' || typeof item.source_version !== 'string') return [];
+      numbers.add(item.number);
+    }
+    return value;
+  }
+  function validFeedback(message, feedback) {
+    return feedback && ['up', 'down'].includes(feedback.value) && feedback.messageId === message.id &&
+      feedback.turnId === message.turnId && typeof feedback.createdAt === 'string' &&
+      !Number.isNaN(Date.parse(feedback.createdAt)) &&
+      (feedback.conversationId === null || Number.isSafeInteger(feedback.conversationId));
+  }
   function executionNote(message) {
     return (message.toolTrace || []).some((t) => t.name === 'create_ticket')
       ? '工单操作可能已经提交，请核查后再操作。'
@@ -62,10 +80,14 @@
         messages: session.messages.filter((message) =>
           typeof message.id === "string" && typeof message.turnId === "string" &&
           typeof message.text === "string" && ["user", "assistant"].includes(message.role)
-        ).slice(-200).map((message) => message.status === "pending"
-          ? { ...message, status: "stopped", detail: `上次回复未完成。${executionNote(message)}`,
-              toolTrace: (message.toolTrace || []).map((trace) => trace.status === 'running' ? {...trace, status: 'unknown'} : trace) }
-          : message),
+        ).slice(-200).map((message) => {
+          const restored = { ...message, citations: validCitations(message.citations),
+            feedback: validFeedback(message, message.feedback) ? message.feedback : null };
+          return message.status === "pending"
+            ? { ...restored, status: "stopped", detail: `上次回复未完成。${executionNote(message)}`,
+                toolTrace: (message.toolTrace || []).map((trace) => trace.status === 'running' ? {...trace, status: 'unknown'} : trace) }
+            : restored;
+        }),
       }));
       activeId = stored?.activeId;
     } catch { sessions = []; }
@@ -108,21 +130,38 @@
   }
   // Build a small, safe Markdown subset from DOM text nodes. Model and user
   // content are never inserted as HTML, including partial streaming content.
-  function inline(parent, text) {
+  function citationText(parent, text, message) {
+    const citations = message?.role === 'assistant' && message.status === 'complete' ? validCitations(message.citations) : [];
+    const byNumber = new Map(citations.map((item) => [item.number, item]));
+    let last = 0;
+    for (const match of text.matchAll(/\[(\d+)\]/g)) {
+      const citation = byNumber.get(Number(match[1]));
+      if (!citation) continue;
+      parent.append(document.createTextNode(text.slice(last, match.index)));
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'citation-button';
+      button.textContent = match[0]; button.setAttribute('aria-label', `查看引用 ${citation.number} 的来源`);
+      button.addEventListener('click', () => openSource(message, citation));
+      parent.append(button);
+      last = match.index + match[0].length;
+    }
+    parent.append(document.createTextNode(text.slice(last)));
+  }
+  function inline(parent, text, message) {
     const parts = text.split(/(\*\*[^*\n]+\*\*|`[^`\n]+`)/g);
     for (const part of parts) {
       if (part.startsWith("**") && part.endsWith("**")) {
         const strong = document.createElement("strong");
-        strong.textContent = part.slice(2, -2);
+        citationText(strong, part.slice(2, -2), message);
         parent.append(strong);
       } else if (part.startsWith("`") && part.endsWith("`") && part.length > 1) {
         const code = document.createElement("code");
         code.textContent = part.slice(1, -1);
         parent.append(code);
-      } else parent.append(document.createTextNode(part));
+      } else citationText(parent, part, message);
     }
   }
-  function richText(parent, text) {
+  function richText(parent, text, message) {
     const fragment = document.createDocumentFragment();
     let paragraph = null;
     let list = null;
@@ -147,16 +186,61 @@
         if (!list || list.tagName !== kind) { list = document.createElement(kind); fragment.append(list); }
         paragraph = null;
         const li = document.createElement("li");
-        inline(li, bullet[1]);
+        inline(li, bullet[1], message);
         list.append(li);
       } else {
         list = null;
         if (!paragraph) { paragraph = document.createElement("p"); fragment.append(paragraph); }
         else paragraph.append(document.createTextNode("\n"));
-        inline(paragraph, line.replace(/^#{1,4}\s+/, ""));
+        inline(paragraph, line.replace(/^#{1,4}\s+/, ""), message);
       }
     }
     parent.replaceChildren(fragment);
+  }
+  let sourceView = 0;
+  function openSource(message, citation) {
+    const sequence = ++sourceView;
+    $('sourceTitle').textContent = `引用 [${citation.number}]`;
+    $('sourcePath').textContent = citation.section_path || '未提供章节路径';
+    $('sourceChunk').textContent = citation.text;
+    $('sourceDocument').hidden = true;
+    $('sourceOriginal').replaceChildren();
+    $('sourceError').hidden = true;
+    $('showOriginal').disabled = false;
+    $('showOriginal').onclick = async () => {
+      if (!Number.isSafeInteger(message.conversationId) || message.conversationId <= 0 || typeof message.toolCallId !== 'string') {
+        $('sourceError').textContent = '无法定位这条引用的原始会话。'; $('sourceError').hidden = false; return;
+      }
+      $('showOriginal').disabled = true;
+      try {
+        const url = `/api/conversations/${message.conversationId}/tool-calls/${encodeURIComponent(message.toolCallId)}/sources/${citation.number}/document?user_id=${encodeURIComponent(userId)}`;
+        const response = await fetch(url);
+        if (!response.ok) throw new Error('来源原文暂时不可用，请稍后重试。');
+        const documentView = await response.json();
+        if (sequence !== sourceView || !$('sourceDialog').open) return;
+        if (typeof documentView.text !== 'string' || documentView.source_key !== citation.source_key ||
+            documentView.source_version !== citation.source_version || documentView.section_path !== citation.section_path) {
+          throw new Error('来源版本与当前引用不一致。');
+        }
+        const lines = documentView.text.split('\n');
+        const { start, end } = documentView.anchor || {};
+        const pre = $('sourceOriginal'); pre.replaceChildren();
+        if (Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end >= start && end <= lines.length) {
+          pre.append(document.createTextNode(lines.slice(0, start - 1).join('\n') + (start > 1 ? '\n' : '')));
+          const mark = document.createElement('mark'); mark.textContent = lines.slice(start - 1, end).join('\n'); pre.append(mark);
+          if (end < lines.length) pre.append(document.createTextNode('\n' + lines.slice(end).join('\n')));
+          $('sourceDocument').hidden = false; mark.scrollIntoView({ block: 'nearest' });
+        } else {
+          pre.textContent = documentView.text; $('sourceDocument').hidden = false;
+        }
+      } catch (error) {
+        if (sequence !== sourceView || !$('sourceDialog').open) return;
+        $('sourceError').textContent = error.message || '来源原文暂时不可用。'; $('sourceError').hidden = false;
+      } finally {
+        if (sequence === sourceView) $('showOriginal').disabled = false;
+      }
+    };
+    if (!$('sourceDialog').open) $('sourceDialog').showModal();
   }
   function renderMessage(message) {
     const article = document.createElement("article");
@@ -201,7 +285,7 @@
     }
     trace.hidden = !trace.childElementCount;
     article.classList.toggle("streaming", message.status === "pending" && Boolean(message.text));
-    if (message.text) richText(body, message.text);
+    if (message.text) richText(body, message.text, message);
     else if (message.status === "pending") {
       const typing = document.createElement("div");
       typing.className = "typing";
@@ -214,6 +298,30 @@
     } else body.textContent = message.role === "assistant" ? "本次未收到完整回复。" : "";
     tools.replaceChildren();
     if (message.role !== "assistant" || message.status === "pending") return;
+    if (message.status === 'complete' && message.text) {
+      const feedback = document.createElement('div');
+      feedback.className = 'feedback'; feedback.setAttribute('aria-label', '对这条回答的评价');
+      for (const [value, symbol, label] of [['up', '👍', '满意'], ['down', '👎', '不满意']]) {
+        const button = document.createElement('button');
+        button.type = 'button'; button.className = 'feedback-button';
+        button.textContent = symbol; button.setAttribute('aria-label', label);
+        button.setAttribute('aria-pressed', String(message.feedback?.value === value));
+        button.disabled = Boolean(message.feedback);
+        button.addEventListener('click', () => {
+          if (message.feedback || message.status !== 'complete') return;
+          message.feedback = { value, createdAt: new Date().toISOString(), messageId: message.id,
+            turnId: message.turnId, conversationId: message.conversationId ?? current()?.conversationId ?? null };
+          persist(); updateMessage(message, elements);
+          $('announcer').textContent = '已反馈';
+        });
+        feedback.append(button);
+      }
+      if (message.feedback) {
+        const status = document.createElement('span'); status.className = 'feedback-status'; status.textContent = '已反馈';
+        feedback.append(status);
+      }
+      tools.append(feedback);
+    }
     if (message.text) {
       const copy = document.createElement("button");
       copy.className = "copy-button";
@@ -359,6 +467,18 @@
             persist();
             scrollToBottom();
             $('announcer').textContent = `${payload.name} ${payload.status === 'running' ? '执行中' : payload.status === 'completed' ? '已完成' : '结果需核查'}`;
+          } else if (event === 'sources') {
+            const citations = validCitations(payload.citations);
+            if (!Array.isArray(payload.citations) || citations.length !== payload.citations.length ||
+                typeof payload.message_id !== 'string' || !/^[1-9]\d*$/.test(payload.message_id) ||
+                typeof payload.tool_call_id !== 'string' || !session.conversationId) {
+              throw new Error('引用来源格式异常，请重试。');
+            }
+            assistant.citations = citations;
+            assistant.toolCallId = payload.tool_call_id;
+            assistant.conversationId = session.conversationId;
+            assistant.serverMessageId = payload.message_id;
+            persist();
           } else if (event === "done") terminal = payload.finish_reason;
           else throw new Error("回复格式异常，请重试。");
         }
@@ -440,6 +560,8 @@
   $("scopeButton").addEventListener("click", help);
   $("closeHelp").addEventListener("click", () => $("helpDialog").close());
   $("helpDone").addEventListener("click", () => { $("helpDialog").close(); $("messageInput").focus(); });
+  $('closeSource').addEventListener('click', () => $('sourceDialog').close());
+  $('sourceDialog').addEventListener('close', () => { sourceView++; });
   window.matchMedia("(max-width: 760px)").addEventListener("change", syncNavAccess);
   restore(); render(); syncNavAccess(); void checkService();
 })();

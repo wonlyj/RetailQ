@@ -70,3 +70,24 @@ def document(request: Request, conversation_id: int, tool_call_id: str, number: 
     root = Path(request.app.state.settings.knowledge_data_dir)
     if not root.is_absolute(): root = Path(__file__).resolve().parents[2] / root
     return load_source_document(root, items[number-1])
+
+
+def _workflow_repository(request):
+    repository=getattr(request.app.state,'workflow_repository',None)
+    if repository is None: raise ServiceError('workflow_not_configured',503,'工作流尚未配置。')
+    return repository
+
+
+@router.get('/api/conversations/{conversation_id}/workflow-turns/{turn_id}/sources',response_model=SourceBundle)
+def workflow_sources(request:Request,conversation_id:int,turn_id:str,user_id:str):
+    items=_workflow_repository(request).load_citations(conversation_id,user_id,'wf_'+turn_id)
+    return SourceBundle(citations=[public_citation(item) for item in items])
+
+
+@router.get('/api/conversations/{conversation_id}/workflow-turns/{turn_id}/sources/{number}/document',response_model=SourceDocumentView)
+def workflow_document(request:Request,conversation_id:int,turn_id:str,number:int,user_id:str):
+    items=_workflow_repository(request).load_citations(conversation_id,user_id,'wf_'+turn_id)
+    if not 1<=number<=len(items): raise ServiceError('citation_not_found',404,'未找到引用来源。')
+    root=Path(request.app.state.settings.knowledge_data_dir)
+    if not root.is_absolute():root=Path(__file__).resolve().parents[2]/root
+    return load_source_document(root,items[number-1])

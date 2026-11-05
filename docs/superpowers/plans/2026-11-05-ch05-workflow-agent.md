@@ -125,17 +125,17 @@ def test_finalize_same_turn_is_idempotent(repo, turn, low_conf_state):
 
 **Interfaces:** `EvidenceSteps.retrieve(state:WorkflowState)->dict`、`.gate(state)->dict` async；`validate_answer_references(answer:str,citations:tuple[CitationRecord,...])->None`；来源 API `GET /api/conversations/{cid}/workflow-turns/{turn_id}/sources[/{number}/document]`，复用 public_citation/load_source_document 和归属校验。
 
-- [ ] 写红测试：知识出口调用顺序 retrieve→gate→Agent；退款证据先于订单工具；业务/投诉/闲聊零检索。低分/无候选只兜底且入池原问题、Agent计数0；门槛配置缺失/身份失配/服务异常为 error、不入低置信池。来源证据全集连续编号，正文可仅引用子集；越界/缺必需引用不得成功终结。
+- [x] 写红测试：知识出口调用顺序 retrieve→gate→Agent；退款证据先于订单工具；业务/投诉/闲聊零检索。低分/无候选只兜底且入池原问题、Agent计数0；门槛配置缺失/身份失配/服务异常为 error、不入低置信池。来源证据全集连续编号，正文可仅引用子集；越界/缺必需引用不得成功终结。
 
 ```python
 def test_answer_rejects_out_of_bundle_number(citations):
     with pytest.raises(ServiceError):
         validate_answer_references('政策见[99]。', citations)
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_evidence.py tests/test_workflow_sources.py -q` 确认红，实现原 `retrieve_knowledge(question)` + DynamicConfidencePolicy；通过后才 prepare_bundle 并纳入 Agent 完整输入预算，不用旧 RAGDecision 生成回答。保持检索/重排/归一/策略身份逻辑不变，不自动调阈值。
-- [ ] 调检索前向 BudgetLedger 预留现有 query_normalize Prompt+原问题的保守输入估算及256输出；现有同步检索无usage回传，记 reserved（不假称实耗），每次最多一次归一调用。预留不足就不启动检索；embedding/rerank另记调用阶段，不伪造其token计费。线程请求超时/取消仍须保留会话租约到后台任务结束，不能让新轮与仍运行检索共享未释放资源。
-- [ ] 实现新来源路由和不可变快照验证；回答流结束只做引用结构检查，失败不保存完整答复、不发sources/done，已流出的文本为未完成。知识类完全缺信息的追问或停止用确定性文本，不伪造带证据完整答案；不新增生成后置信检查。
-- [ ] 运行本任务测试及 `tests/test_sources_api.py tests/test_rag_answer.py tests/test_rag_configuration.py`，覆盖归档丢失/篡改、跨用户读取；留痕并提交 `feat: gate mandatory retrieval before agent streaming`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_evidence.py tests/test_workflow_sources.py -q` 确认红，实现原 `retrieve_knowledge(question)` + DynamicConfidencePolicy；通过后才 prepare_bundle 并纳入 Agent 完整输入预算，不用旧 RAGDecision 生成回答。保持检索/重排/归一/策略身份逻辑不变，不自动调阈值。
+- [x] 调检索前向 BudgetLedger 预留现有 query_normalize Prompt+原问题的保守输入估算及256输出；现有同步检索无usage回传，记 reserved（不假称实耗），每次最多一次归一调用。预留不足就不启动检索；embedding/rerank另记调用阶段，不伪造其token计费。线程请求超时/取消仍须保留会话租约到后台任务结束，不能让新轮与仍运行检索共享未释放资源。
+- [x] 实现新来源路由和不可变快照验证；回答流结束只做引用结构检查，失败不保存完整答复、不发sources/done，已流出的文本为未完成。知识类完全缺信息的追问或停止用确定性文本，不伪造带证据完整答案；不新增生成后置信检查。
+- [x] 运行本任务测试及 `tests/test_sources_api.py tests/test_rag_answer.py tests/test_rag_configuration.py`，覆盖归档丢失/篡改、跨用户读取；留痕并提交 `feat: gate mandatory retrieval before agent streaming`。
 
 ### T5：LangGraph 骨架、AsyncSqliteSaver 与主入口替换
 

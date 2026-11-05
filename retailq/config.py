@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     mysql_root_password: SecretStr = Field(default=SecretStr(""), repr=False)
     tool_timeout_seconds: float = Field(default=5, gt=0)
     tool_read_retries: int = Field(default=1, ge=0, le=1)
+    workflow_max_tool_steps: int = Field(default=4, gt=0, le=32)
+    workflow_max_model_calls: int = Field(default=6, gt=0, le=64)
+    workflow_turn_timeout_seconds: float = Field(default=120, gt=0, le=600)
+    workflow_max_total_tokens: int = Field(default=65536, gt=0)
+    workflow_checkpoint_path: str = 'artifacts/workflow/checkpoints.sqlite'
     knowledge_tokenizer_path: str = 'artifacts/knowledge/assets/tokenizer.json'
     embedding_base_url: str = 'https://api.siliconflow.cn/v1'
     embedding_api_key: SecretStr = Field(default=SecretStr(''),repr=False)

@@ -65,7 +65,7 @@ LangGraph 尚未安装，流版本和 saver 真实签名在 T5 先核对，不�
 
 所有命令在仓库根目录PowerShell执行，先设 `$ProjectPython = '.\.venv\Scripts\python.exe'`。测试可控上游必须依据收到的上一条工具回执选择下一步，不按请求序号无条件吐预设结果。T1定义测试fixture `controlled_run(scenario:str)->dict`，返回实际tool_names/model_calls/token_events/finish_reason等观测值；后续测试各自扩展受控依赖，不把fixture结果当真实模型评估。
 
-- [ ] 写 `test_bare_agent_two_tools_then_real_stream`：可控上游依次 query_order(1001) → 读回执 → query_logistics(1001) → actions=[] → 最终流；断言2次工具执行、4次主力模型请求、成对调用 ID、token 增量来自最终流，且入口未导入 LangGraph。补零/一次工具、缺参收敛及拒绝并行/create_ticket/query_faq/重复ID/重复同参循环/DSML/无效JSON测试。
+- [x] 写 `test_bare_agent_two_tools_then_real_stream`：可控上游依次 query_order(1001) → 读回执 → query_logistics(1001) → actions=[] → 最终流；断言2次工具执行、4次主力模型请求、成对调用 ID、token 增量来自最终流，且入口未导入 LangGraph。补零/一次工具、缺参收敛及拒绝并行/create_ticket/query_faq/重复ID/重复同参循环/DSML/无效JSON测试。
 
 ```python
 async def test_bare_agent_two_tools_then_real_stream(controlled_run):
@@ -73,11 +73,11 @@ async def test_bare_agent_two_tools_then_real_stream(controlled_run):
     assert actual['tool_names'] == ['query_order', 'query_logistics']
     assert actual['model_calls'] == 4 and actual['token_events'] > 1
 ```
-- [ ] 写预算失败测试：预留不足时上游请求计数不增长；usage 缺失保持保守估算；工具超大结果触发预算停止不丢本轮工具配对；总工具4次/模型6次/120秒上限，配置用尽不再调用最终模型。分类/检索有单独账目，不占6次 Agent 上限，但占全轮总量和时间。
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_agent.py tests/test_workflow_budget.py -q`，确认因新功能缺失为红；不得把无关环境错误算 TDD 红。
-- [ ] 实现精确契约及配置 `WORKFLOW_MAX_TOOL_STEPS=4`、`WORKFLOW_MAX_MODEL_CALLS=6`、`WORKFLOW_TURN_TIMEOUT_SECONDS=120`、`WORKFLOW_MAX_TOTAL_TOKENS=65536`、`WORKFLOW_CHECKPOINT_PATH=artifacts/workflow/checkpoints.sqlite`。模型调用前预留 input+output，上游 usage 缺失或请求失败不退还未知消耗；reserve 与实际 usage 不能重复计费。保留现有输入窗口/完整轮裁剪、只读重试和脱敏错误；deadline 由调用层注入，checkpoint 只存已耗/剩余时长。
-- [ ] 运行上述测试及 `tests/test_gateway.py tests/test_tool_gateway.py tests/test_tool_context.py`；用 `& $ProjectPython -m scripts.demo_agent_loop --mode controlled --question '先查订单1001状态，再查物流位置'` 展示请求/工具/回灌顺序，退出0且执行两工具；`--mode real` 使用现有配置、明确演示工具边界，不创建工单。
-- [ ] 立即追记 dev-notes 四项和红绿/演示证据，再限定文件本地提交 `feat: add bounded bare agent loop`。
+- [x] 写预算失败测试：预留不足时上游请求计数不增长；usage 缺失保持保守估算；工具超大结果触发预算停止不丢本轮工具配对；总工具4次/模型6次/120秒上限，配置用尽不再调用最终模型。分类/检索有单独账目，不占6次 Agent 上限，但占全轮总量和时间。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_agent.py tests/test_workflow_budget.py -q`，确认因新功能缺失为红；不得把无关环境错误算 TDD 红。
+- [x] 实现精确契约及配置 `WORKFLOW_MAX_TOOL_STEPS=4`、`WORKFLOW_MAX_MODEL_CALLS=6`、`WORKFLOW_TURN_TIMEOUT_SECONDS=120`、`WORKFLOW_MAX_TOTAL_TOKENS=65536`、`WORKFLOW_CHECKPOINT_PATH=artifacts/workflow/checkpoints.sqlite`。模型调用前预留 input+output，上游 usage 缺失或请求失败不退还未知消耗；reserve 与实际 usage 不能重复计费。保留现有输入窗口/完整轮裁剪、只读重试和脱敏错误；deadline 由调用层注入，checkpoint 只存已耗/剩余时长。
+- [x] 运行上述测试及 `tests/test_gateway.py tests/test_tool_gateway.py tests/test_tool_context.py`；用 `& $ProjectPython -m scripts.demo_agent_loop --mode controlled --question '先查订单1001状态，再查物流位置'` 展示请求/工具/回灌顺序，退出0且执行两工具；`--mode real` 使用现有配置、明确演示工具边界，不创建工单。
+- [x] 立即追记 dev-notes 四项和红绿/演示证据，再限定文件本地提交 `feat: add bounded bare agent loop`。
 
 ### T2：七类意图、固定路由与标注样例
 

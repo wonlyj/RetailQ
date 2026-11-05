@@ -18,12 +18,14 @@ from retailq.config import Settings
 from retailq.errors import ServiceError
 from retailq.model_output import ModelTextBuffer, require_plain_model_text
 from retailq.schemas import AfterSalesResult
+from retailq.workflow.contracts import AgentDecision, UsageCharge, parse_actions, usage_charge
 
 
 @dataclass(frozen=True)
 class ModelChunk:
     text: str = ""
     finish_reason: str | None = None
+    usage: UsageCharge | None = None
 
 
 class ModelGateway(Protocol):
@@ -89,10 +91,11 @@ class OpenAIModelGateway:
         await self.http_async.aclose()
         self.http.close()
 
-    async def select_tool(self, messages: list[BaseMessage], tools: list[BaseTool]) -> AIMessage:
+    async def select_tool(self, messages: list[BaseMessage], tools: list[BaseTool], *, max_tokens: int | None = None) -> AIMessage:
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                response = await self.model.bind_tools(tools, tool_choice='auto', parallel_tool_calls=False).ainvoke(messages)
+                options = {'max_tokens':max_tokens} if max_tokens is not None else {}
+                response = await self.model.bind_tools(tools, tool_choice='auto', parallel_tool_calls=False).ainvoke(messages,**options)
             reason = response.response_metadata.get('finish_reason')
             if response.invalid_tool_calls or not isinstance(response.content,str):
                 raise unsupported()
@@ -114,13 +117,22 @@ class OpenAIModelGateway:
         except Exception as exc:
             raise public_error(exc) from None
 
-    async def stream(self, messages: list[BaseMessage]) -> AsyncIterator[ModelChunk]:
+    async def decide_agent(self, messages, tools, *, max_tokens: int) -> AgentDecision:
+        response = await self.select_tool(messages,tools,max_tokens=max_tokens)
+        actions = () if response.tool_calls else parse_actions(response.content)
+        return AgentDecision(response,actions,usage_charge(response.usage_metadata))
+
+    def stream_answer(self, messages, *, max_tokens: int):
+        return self.stream(messages,max_tokens=max_tokens)
+
+    async def stream(self, messages: list[BaseMessage], *, max_tokens: int | None = None) -> AsyncIterator[ModelChunk]:
         seen_text = False
         seen_finish = False
         text_buffer = ModelTextBuffer()
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                async with aclosing(self.model.astream(messages)) as stream:
+                options = {'max_tokens':max_tokens} if max_tokens is not None else {}
+                async with aclosing(self.model.astream(messages,**options)) as stream:
                     async for chunk in stream:
                         if chunk.tool_calls or chunk.tool_call_chunks or chunk.additional_kwargs.get("tool_calls"):
                             raise unsupported()
@@ -136,8 +148,9 @@ class OpenAIModelGateway:
                             seen_text = True
                         if isinstance(reason, str) and reason:
                             seen_finish = True
-                        if visible or reason:
-                            yield ModelChunk(visible, reason)
+                        usage = usage_charge(chunk.usage_metadata)
+                        if visible or reason or usage is not None:
+                            yield ModelChunk(visible, reason, usage)
                 if not seen_text:
                     raise unsupported()
                 if not seen_finish:

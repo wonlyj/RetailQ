@@ -24,18 +24,18 @@ $CorpusDraft = (& $ProjectPython -m scripts.knowledge prepare-corpus --manifest 
 
 ## 校准和评估
 
-使用新目录保存每一轮，不覆盖或删除旧轮次。模型调用可能产生费用；中断前已发送但未记录的请求在恢复时可能再次计费。
+使用新目录保存每一轮，不覆盖或删除旧轮次。模型调用可能产生费用；中断前已发送但未记录的请求在恢复时可能再次计费。以下命令仅供复现旧评估，旧校准方法不适合作为新门槛；新相关性标注流程见[校准说明](ch04-calibration.md)。
 
 ```powershell
 $RunStamp = Get-Date -Format yyyyMMdd-HHmmss
 $CalibrationDir = "artifacts/evals/ch04/calibration-$RunStamp"
 $TestDir = "artifacts/evals/ch04/test-$RunStamp"
 & $ProjectPython -m scripts.evaluate_rag run --split calibration --mode real --output $CalibrationDir
-& $ProjectPython -m scripts.calibrate_rag --report "$CalibrationDir/report.json" --output artifacts/knowledge/rag-confidence.json
+& $ProjectPython -m scripts.calibrate_rag --legacy --report "$CalibrationDir/report.json" --output artifacts/knowledge/rag-confidence.json
 & $ProjectPython -m scripts.evaluate_rag run --split test --mode real --output $TestDir
 ```
 
-20 个校准问题用于各策略分别选取分数门槛，分数不是概率；80 个测试问题用于四策略独立对比，不应用测试结果调整门槛。每轮绑定模型、语料、代码、依赖和策略身份，身份变化后不能将旧 checkpoint 接到新轮次。报告区分 Recall、MRR、Faithfulness、拒答和无可用分母的 N/A；Faithfulness 由模型裁判评估，仍需人工抽查。
+上面 `--legacy` 仅用于复现历史实验，旧方法可能将相关但不可答的候选误判为不相关，尚在验证的新流程见 [校准说明](ch04-calibration.md)。20 个历史校准问题用于各策略分别选取分数门槛，分数不是概率；80 个测试问题用于四策略独立对比，不应用测试结果调整门槛。每轮绑定模型、语料、代码、依赖和策略身份，身份变化后不能将旧 checkpoint 接到新轮次。报告区分 Recall、MRR、Faithfulness、拒答和无可用分母的 N/A；Faithfulness 由模型裁判评估，仍需人工抽查。
 
 服务中断后，身份未变化时可用 `python -m scripts.evaluate_rag resume --output <原目录>` 恢复，查看报告用 `report --output <原目录>`；确认不再继续该轮时，可用 `seal --output <原目录> --reason '<原因>'` 封存。保留错误记录，不以未完成报告声称最终结果。更多门槛说明见 [校准说明](ch04-calibration.md)。
 

@@ -1,0 +1,45 @@
+{"id":"K01","split":"calibration","family":"washing-cup","kind":"colloquial","query":"保温杯能丢洗碗机里洗不？","expected":"柔软工具手洗，不建议洗碗机","source":"product-faq.md / 保温杯可以放进洗碗机吗？","answerable":true}
+{"id":"K02","split":"calibration","family":"bag-rain","kind":"colloquial","query":"双肩包被淋湿了咋晾？","expected":"擦干表面，在通风阴凉处自然晾干，不暴晒","source":"product-faq.md / 双肩包淋雨后如何保养？","answerable":true}
+{"id":"K03","split":"calibration","family":"invoice","kind":"colloquial","query":"电子发票啥时候能到我邮箱？","expected":"3个工作日内发送邮箱","source":"product-faq.md / 发票如何开具？","answerable":true}
+{"id":"K04","split":"calibration","family":"payment","kind":"colloquial","query":"下单除了微信还能咋付钱？","expected":"支付宝及主流银行储蓄卡或信用卡在线支付","source":"product-faq.md / 支持哪些支付方式？","answerable":true}
+{"id":"K05","split":"calibration","family":"stock","kind":"colloquial","query":"卖光了啥时候再上货？","expected":"现货售罄通常3至7天补货，可点到货通知","source":"product-faq.md / 商品缺货多久补货？","answerable":true}
+{"id":"K06","split":"calibration","family":"catbed","kind":"colloquial","query":"猫窝脏了整个扔洗衣机行不？","expected":"外套取出垫芯后可轻柔冷水机洗，垫芯不可机洗","source":"product-faq.md / 猫窝是否可以机洗？","answerable":true}
+{"id":"K07","split":"calibration","family":"w20-noise","kind":"missing_related","query":"MH-W20水泵噪音是多少分贝？","expected":"资料没有具体分贝数","source":"product-specs.md / MH-W20","answerable":false}
+{"id":"K08","split":"calibration","family":"hp12-wire","kind":"missing_related","query":"MH-HP12电源线具体长几米？","expected":"资料没有电源线长度","source":"product-specs.md / MH-HP12","answerable":false}
+{"id":"K09","split":"calibration","family":"astronomy","kind":"unrelated","query":"木星有多少颗卫星？","expected":"知识库没有天文卫星数量","source":"无","answerable":false}
+{"id":"K10","split":"calibration","family":"recipes","kind":"unrelated","query":"红烧肉的配料和烹饪时间是什么？","expected":"知识库没有菜谱","source":"无","answerable":false}
+{"id":"K11","split":"calibration","family":"w20-water","kind":"model","query":"MH-W20的水箱有多大？","expected":"2L","source":"product-specs.md / MH-W20","answerable":true}
+{"id":"K12","split":"calibration","family":"installation","kind":"policy","query":"联网智能设备第一次怎么激活？","expected":"下载平台App，扫码添加并连接2.4G Wi-Fi","source":"after-sales-manual.md / 设备安装与激活","answerable":true}
+{"id":"K13","split":"calibration","family":"human-service","kind":"colloquial","query":"啥时候能找真人客服？","expected":"人工客服每日9:00至22:00","source":"after-sales-manual.md / 人工客服入口与时间","answerable":true}
+{"id":"K14","split":"calibration","family":"aviation","kind":"unrelated","query":"民用飞机发动机的推力怎么计算？","expected":"知识库没有飞机发动机推力资料","source":"无","answerable":false}
+{"id":"K15","split":"calibration","family":"music-theory","kind":"unrelated","query":"怎样给小提琴更换琴弦和调音？","expected":"知识库没有小提琴调音资料","source":"无","answerable":false}
+{"id":"H01","split":"regression","family":"shipping","kind":"colloquial","query":"没凑够包邮的钱，配送费咋收呀？","expected":"普通配送满99元免基础运费，不满收10元；偏远地区或特殊商品以结算规则为准","source":"shipping-policy.md / 运费标准","answerable":true}
+{"id":"H02","split":"regression","family":"cancel","kind":"colloquial","query":"买错了还没发货，我能自己撤单不？","expected":"未发货前可在我的订单自助取消","source":"product-faq.md / 订单可以修改或取消吗？","answerable":true}
+{"id":"H03","split":"regression","family":"presale","kind":"colloquial","query":"预售的东西啥时候给我寄？","expected":"以商品详情页标注的发货时间为准","source":"product-faq.md / 发货时效多久？","answerable":true}
+{"id":"H04","split":"regression","family":"return","kind":"colloquial","query":"东西刚签收不想要了能退吗？","expected":"签收后7天内商品完好不影响二次销售可申请，具体商品例外以规则为准","source":"returns-policy.md / 无理由退货 / 适用范围","answerable":true}
+{"id":"H05","split":"regression","family":"shoe","kind":"colloquial","query":"运动鞋弄脏了咋收拾不伤鞋？","expected":"软刷轻刷，避免暴晒","source":"after-sales-manual.md / 保养方式","answerable":true}
+{"id":"H06","split":"regression","family":"coupon","kind":"colloquial","query":"券买东西时要在哪儿选上？","expected":"结算页使用优惠券中勾选","source":"product-faq.md / 优惠券和满减怎么用？","answerable":true}
+{"id":"H07","split":"regression","family":"lp100-weight","kind":"model","query":"MH-LP100适合多少体重的猫？","expected":"1.5kg至8kg","source":"product-specs.md / MH-LP100","answerable":true}
+{"id":"H08","split":"regression","family":"w40-water","kind":"model","query":"MH-W40饮水机水箱容量多少？","expected":"4L","source":"product-specs.md / MH-W40","answerable":true}
+{"id":"H09","split":"regression","family":"w60-noise","kind":"missing_related","query":"MH-W60的双泵噪音具体多少分贝？","expected":"资料没有具体噪音分贝数","source":"product-specs.md / MH-W60","answerable":false}
+{"id":"H10","split":"regression","family":"lp50-life","kind":"missing_related","query":"MH-LP50猫砂盆的使用寿命是几年？","expected":"资料没有使用寿命年数","source":"product-specs.md / MH-LP50","answerable":false}
+{"id":"H11","split":"regression","family":"membership-expiry","kind":"missing_related","query":"会员积分几个月过期？","expected":"资料没有积分有效期","source":"product-faq.md / 会员等级与积分规则？","answerable":false}
+{"id":"H12","split":"regression","family":"music","kind":"unrelated","query":"贝多芬第九交响曲有几个乐章？","expected":"知识库没有交响曲知识","source":"无","answerable":false}
+{"id":"H13","split":"regression","family":"geography","kind":"unrelated","query":"喜马拉雅山平均海拔多少？","expected":"知识库没有山脉海拔知识","source":"无","answerable":false}
+{"id":"H15","split":"regression","family":"warranty-cancel-multi","kind":"multi","query":"电子商品保修多久，订单没发货怎么取消？","expected":"电子类自签收起保修12个月；未发货订单可在我的订单自助取消","source":"after-sales-manual.md / 保修说明 + product-faq.md / 订单可以修改或取消吗？","answerable":true}
+{"id":"H16","split":"regression","family":"transport-damage","kind":"colloquial","query":"快递送来就摔坏了，我咋处理？","expected":"签收后48小时内联系客服并提供开箱视频与照片，核实后可免费补发或退款","source":"returns-policy.md / 运输破损处理","answerable":true}
+{"id":"H17","split":"regression","family":"repair-cost","kind":"missing_related","query":"超保设备维修工本费具体要付多少元？","expected":"费用可能收取并提前告知，资料没有具体金额","source":"after-sales-manual.md / 维修寄修流程","answerable":false}
+{"id":"H18","split":"regression","family":"price-protection","kind":"colloquial","query":"刚下单就降价了差价咋办？","expected":"自营商品下单后7天内可从我的订单申请价保，差价退原支付渠道","source":"product-faq.md / 价格保护怎么申请？","answerable":true}
+{"id":"H19","split":"regression","family":"late-refund","kind":"forbidden","query":"退货审核通过后请给个保证到账的日期。","expected":"不承诺具体到账日期，以平台售后规则及支付渠道为准","source":"returns-policy.md / 无理由退货 / 退款时效","answerable":false}
+{"id":"T01","split":"test","family":"delivery-regions","kind":"colloquial","query":"港澳台能给寄过去不？","expected":"港澳台及海外暂不支持自营配送","source":"product-faq.md / 配送范围与偏远地区？","answerable":true}
+{"id":"T02","split":"test","family":"shipping-benefit","kind":"colloquial","query":"银卡一个月能免几次基础运费？","expected":"银卡会员每月一次免运费权益，不抵偏远地区附加运费","source":"product-faq.md / 会员运费权益？","answerable":true}
+{"id":"T03","split":"test","family":"w60-filter","kind":"colloquial","query":"MH-W60饮水机滤芯多长时间换一回？","expected":"建议每4周更换滤芯","source":"product-specs.md / MH-W60","answerable":true}
+{"id":"T04","split":"test","family":"feeder-jam","kind":"colloquial","query":"喂食器老卡粮要先查啥？","expected":"检查颗粒直径是否超12mm、粮桶是否受潮结块，清理出粮口","source":"after-sales-manual.md / 常见故障自查","answerable":true}
+{"id":"T05","split":"test","family":"exchange-shipping","kind":"colloquial","query":"东西本身坏了换货，来回运费谁出？","expected":"因质量问题换货往返运费由平台承担","source":"returns-policy.md / 换货政策 / 换货运费","answerable":true}
+{"id":"T06","split":"test","family":"lp50-app","kind":"model","query":"MH-LP50支持App远程联网监控吗？","expected":"不含App联网功能，不支持满溢推送","source":"product-specs.md / MH-LP50","answerable":true}
+{"id":"T07","split":"test","family":"warranty-coupon","kind":"multi","query":"电子商品保修多久，优惠券在哪儿勾选？","expected":"自签收起保修12个月；结算页使用优惠券中勾选","source":"after-sales-manual.md / 保修说明 + product-faq.md / 优惠券和满减怎么用？","answerable":true}
+{"id":"T08","split":"test","family":"w40-decibels","kind":"missing_related","query":"MH-W40饮水机泵噪音具体是多少分贝？","expected":"资料未提供具体分贝数","source":"product-specs.md / MH-W40","answerable":false}
+{"id":"T09","split":"test","family":"fd30-screen-size","kind":"missing_related","query":"MH-FD30显示屏的屏幕尺寸有多大？","expected":"资料未提供屏幕尺寸","source":"product-specs.md / MH-FD30","answerable":false}
+{"id":"T10","split":"test","family":"basketball","kind":"unrelated","query":"篮球比赛三分线距离篮筐有多远？","expected":"知识库没有篮球规则","source":"无","answerable":false}
+{"id":"T11","split":"test","family":"overseas-promise","kind":"forbidden","query":"你们保证可以把商品寄到海外吗？","expected":"暂不支持自营配送到海外，不能承诺寄达","source":"product-faq.md / 配送范围与偏远地区？","answerable":true}
+{"id":"T12","split":"test","family":"remote-area-shipping","kind":"missing_related","query":"西藏配送的附加运费固定多少钱？","expected":"偏远地区附加运费另计，资料没有固定金额","source":"product-faq.md / 配送范围与偏远地区？","answerable":false}

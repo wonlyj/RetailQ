@@ -76,7 +76,7 @@ class ConfidencePolicy:
             raise ServiceError('rag_policy_unavailable', 503, '知识置信度配置缺失或与当前版本不一致，请先完成校准。') from None
 
     def allows(self, result):
-        if self.identity['strategy'] not in ('all', result.strategy) or result.strategy not in self.thresholds or result.snapshot.corpus_hash != self.identity['corpus_hash']:
+        if self.identity['strategy'] not in ('all', 'all-v2', result.strategy) or result.strategy not in self.thresholds or result.snapshot.corpus_hash != self.identity['corpus_hash']:
             raise ServiceError('rag_policy_unavailable', 503, '当前检索策略尚未校准。')
         return bool(result.candidates) and result.candidates[0].score >= self.thresholds[result.strategy]
 

@@ -44,6 +44,18 @@ def test_identity_contains_no_credentials_and_changes_when_code_changes(tmp_path
     assert first != second and first['split']=='calibration' and first['expected']==80
 
 
+def test_test_report_identity_matches_frozen_policy_identity(tmp_path):
+    from types import SimpleNamespace
+    from scripts.evaluate_rag import build_identity
+    from retailq.config import Settings
+    source=tmp_path/'sample.py';source.write_text('x',encoding='utf-8')
+    settings=Settings(_env_file=None)
+    snapshot=SimpleNamespace(corpus_hash='abc',collection='collection')
+    frozen={'model':'m','corpus_hash':'abc','prompt_hash':'p','query_hash':'q','strategy':'all-v2'}
+    identity=build_identity(settings,snapshot,'test',files=[source],policy_identity_override=frozen)
+    assert identity['policy_identity']==frozen
+
+
 def test_seal_completes_faith_receipt_before_marking_report_readonly(tmp_path):
     from scripts.evaluate_rag import seal_run
     calls=[]

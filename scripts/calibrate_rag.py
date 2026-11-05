@@ -13,6 +13,77 @@ from retailq.knowledge.evaluation.runner import _plain
 from retailq.knowledge.corpus import _write
 
 
+def fit_relevance_policy(calibration, annotations):
+    """Fit relevance gates from reviewed first-candidate labels, not answerability."""
+    if (not isinstance(calibration, dict) or calibration.get('complete') is not True or
+            calibration.get('split') != 'calibration' or not isinstance(annotations, dict) or
+            annotations.get('identity') != calibration.get('identity')):
+        raise ValueError('completed calibration and matching annotation identity required')
+    checkpoint_hash=sha256(json.dumps(calibration,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
+    if annotations.get('checkpoint_sha256') != checkpoint_hash:
+        raise ValueError('calibration checkpoint differs from annotated data')
+    rows, labels = calibration.get('rows'), annotations.get('labels')
+    identity = calibration.get('identity', {}).get('policy_identity')
+    if (not isinstance(rows, list) or not rows or not isinstance(labels, list) or
+            not isinstance(identity, dict) or set(identity) != {'model','corpus_hash','prompt_hash','query_hash','strategy'} or
+            identity.get('strategy') != 'all-v2'):
+        raise ValueError('invalid calibration data')
+    indexed = {}
+    for label in labels:
+        if not isinstance(label, dict) or set(label) != {'eval_id','strategy','candidate_id','relevant','reason'}:
+            raise ValueError('invalid relevance annotation')
+        key = (label['eval_id'], label['strategy'])
+        if (not all(isinstance(v, str) and v for v in key) or key in indexed or
+                type(label['relevant']) is not bool or not isinstance(label['reason'], str) or not label['reason'].strip()):
+            raise ValueError('invalid or duplicate relevance annotation')
+        indexed[key] = label
+    samples = {strategy: [] for strategy in STRATEGIES}
+    seen = set()
+    for row in rows:
+        if not isinstance(row, dict): raise ValueError('invalid calibration row')
+        key = (row.get('eval_id'), row.get('strategy'))
+        if (not all(isinstance(v, str) and v for v in key) or key in seen or
+                key not in indexed or key[1] not in samples or row.get('phase') != 'complete'):
+            raise ValueError('invalid or unmatched calibration row')
+        seen.add(key)
+        candidates = row.get('candidates')
+        if not isinstance(candidates, list): raise ValueError('candidate list missing')
+        label = indexed[key]
+        if not candidates:
+            if label['candidate_id'] is not None or label['relevant']:
+                raise ValueError('empty candidate annotation mismatch')
+            samples[key[1]].append((None, False))
+            continue
+        candidate = candidates[0]
+        if not isinstance(candidate, dict): raise ValueError('invalid candidate')
+        candidate_id, score = candidate.get('id'), candidate.get('score')
+        if (type(candidate_id) is not int or type(label['candidate_id']) is not int or
+                candidate_id != label['candidate_id'] or type(score) not in (int, float) or not math.isfinite(score)):
+            raise ValueError('candidate identity or score mismatch')
+        samples[key[1]].append((float(score), label['relevant']))
+    if seen != set(indexed): raise ValueError('annotation inventory mismatch')
+    case_ids = calibration['identity'].get('case_ids')
+    if (not isinstance(case_ids, list) or not case_ids or
+            any(not isinstance(case_id, str) or not case_id for case_id in case_ids) or
+            len(case_ids) != len(set(case_ids))):
+        raise ValueError('frozen calibration case inventory missing')
+    question_sets = [{eval_id for eval_id, strat in seen if strat == strategy} for strategy in STRATEGIES]
+    if any(ids != set(case_ids) for ids in question_sets):
+        raise ValueError('strategy question sets differ from frozen inventory')
+    thresholds = {}
+    for strategy, items in samples.items():
+        positives = sum(label for _, label in items)
+        negatives = len(items) - positives
+        scores = sorted({score for score, _ in items if score is not None})
+        if not positives or not negatives or not scores: raise ValueError('both relevance classes required')
+        def objective(threshold):
+            tp = sum(label and score is not None and score >= threshold for score, label in items)
+            tn = sum(not label and (score is None or score < threshold) for score, label in items)
+            return ((tp / positives + tn / negatives) / 2, threshold)
+        thresholds[strategy] = max(scores + [math.nextafter(scores[-1], math.inf)], key=objective)
+    return ConfidencePolicy(identity, thresholds)
+
+
 def fit_confidence_policy(calibration):
     if calibration.get('complete') is not True or calibration.get('split')!='calibration':
         raise ValueError('a completed calibration report is required')
@@ -118,6 +189,9 @@ def publish_policy(policy, output):
 def main(argv=None):
     parser=argparse.ArgumentParser(description='从完整校准报告拟合置信度门槛')
     parser.add_argument('--report',required=True)
+    mode=parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--annotations',help='与报告身份及首位候选绑定的人工相关性标注')
+    mode.add_argument('--legacy',action='store_true',help='复现历史按可回答性校准的旧方法，不建议用于新策略')
     parser.add_argument('--output',default='artifacts/knowledge/rag-confidence.json')
     args=parser.parse_args(argv)
     root=Path(__file__).resolve().parents[1]
@@ -128,12 +202,19 @@ def main(argv=None):
     if not output.is_relative_to((root/'artifacts').resolve()):
         raise ValueError('policy must be under project artifacts')
     report=json.loads(report_path.read_text(encoding='utf-8'))
-    checkpoint=json.loads((report_path.parent/'checkpoint.json').read_text(encoding='utf-8'))
-    manifest=json.loads((report_path.parent/'manifest.json').read_text(encoding='utf-8'))
-    if manifest.get('status')!='completed' or report.get('identity')!=manifest.get('identity'):
-        raise ValueError('calibration manifest is not complete or does not match report')
-    report['rows']=checkpoint['rows']
-    policy=fit_confidence_policy(report)
+    if args.annotations:
+        annotation_path=Path(args.annotations).resolve()
+        if not annotation_path.is_relative_to((root/'artifacts/evals/ch04').resolve()):
+            raise ValueError('annotations must be under chapter-four evaluation artifacts')
+        annotations=json.loads(annotation_path.read_text(encoding='utf-8'))
+        policy=fit_relevance_policy(report,annotations)
+    else:
+        checkpoint=json.loads((report_path.parent/'checkpoint.json').read_text(encoding='utf-8'))
+        manifest=json.loads((report_path.parent/'manifest.json').read_text(encoding='utf-8'))
+        if manifest.get('status')!='completed' or report.get('identity')!=manifest.get('identity'):
+            raise ValueError('calibration manifest is not complete or does not match report')
+        report['rows']=checkpoint['rows']
+        policy=fit_confidence_policy(report)
     backup=publish_policy(policy,output)
     print(json.dumps({'output':str(output),'backup':str(backup) if backup else None,'thresholds':policy.thresholds},ensure_ascii=False))
     return 0

@@ -17,7 +17,7 @@ ROOT=Path(__file__).resolve().parents[1]
 EVAL_ROOT=(ROOT/'artifacts/evals/ch04').resolve()
 
 
-def build_identity(settings,snapshot,split,*,files=None,server_version=None,policy_hash=None):
+def build_identity(settings,snapshot,split,*,files=None,server_version=None,policy_hash=None,policy_identity_override=None):
     from retailq.knowledge.evaluation.contracts import read_cases
     from retailq.knowledge.policy import policy_identity
     if split not in ('calibration','test'): raise ValueError('invalid split')
@@ -35,7 +35,7 @@ def build_identity(settings,snapshot,split,*,files=None,server_version=None,poli
         policy_hash=sha256(policy.read_bytes()).hexdigest() if split=='test' and policy.is_file() else None
     return {'split':split,'expected':80 if split=='calibration' else 320,
             'case_ids':[c.eval_id for c in read_cases(ROOT/'evals/ch04_cases.jsonl') if c.split==split],
-            'policy_identity':policy_identity(settings,snapshot,'hybrid_rerank'),
+            'policy_identity':policy_identity_override if policy_identity_override is not None else policy_identity(settings,snapshot,'hybrid_rerank'),
             'corpus_hash':snapshot.corpus_hash,'collection':snapshot.collection,'source_hash':digest.hexdigest(),
             'policy_hash':policy_hash,'python':sys.version.split()[0],
             'milvus_server':server_version,
@@ -154,7 +154,8 @@ async def execute_real(output, split, *, resume=False):
         with runtime.vectors.open(snapshot.collection) as vector_probe:
             server_version=vector_probe.client.get_server_version()
         frozen_policy,policy_hash=freeze_evaluation_policy(settings,snapshot) if split=='test' else (None,None)
-        identity=build_identity(settings,snapshot,split,server_version=server_version,policy_hash=policy_hash)
+        identity=build_identity(settings,snapshot,split,server_version=server_version,policy_hash=policy_hash,
+                                policy_identity_override=frozen_policy.identity if frozen_policy else None)
         if split=='test' and identity['policy_hash'] is None:
             raise ValueError('test evaluation requires a calibrated policy')
         store=EvaluationStore.resume(output,identity) if resume else EvaluationStore.open_new(output,identity)

@@ -4,6 +4,94 @@ import pytest
 from scripts.calibrate_rag import fit_confidence_policy
 
 
+def bind_checkpoint(report, annotations):
+    import hashlib, json
+    annotations['checkpoint_sha256']=hashlib.sha256(json.dumps(report,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
+
+
+def relevance_fixture():
+    import hashlib, json
+    identity={'policy_identity':{'model':'m','corpus_hash':'abc','prompt_hash':'p','query_hash':'q','strategy':'all-v2'},'run':'frozen',
+              'case_ids':['missing','answerable','unrelated']}
+    rows=[]; labels=[]
+    for strategy in ('dense','bm25','hybrid','hybrid_rerank'):
+        for name,score,answerable,relevant in [('missing',.8,False,True),('answerable',.2,True,True),('unrelated',.1,True,False)]:
+            rows.append({'eval_id':name,'strategy':strategy,'phase':'complete','answerable':answerable,
+                         'candidates':[{'id':len(rows)+1,'score':score}]})
+            labels.append({'eval_id':name,'strategy':strategy,'candidate_id':rows[-1]['candidates'][0]['id'],
+                           'relevant':relevant,'reason':'人工核对候选内容'})
+    report={'complete':True,'split':'calibration','identity':identity,'rows':rows}
+    digest=hashlib.sha256(json.dumps(report,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
+    return report, {'identity':identity,'labels':labels,'checkpoint_sha256':digest}
+
+
+def test_relevance_fit_uses_candidate_relevance_not_answerability():
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,labels=relevance_fixture()
+    policy=fit_relevance_policy(report,labels)
+    assert policy.thresholds==dict.fromkeys(('dense','bm25','hybrid','hybrid_rerank'),.2)
+
+
+def test_calibration_cli_requires_explicit_relevance_annotations_or_legacy_mode():
+    from scripts.calibrate_rag import main
+    with pytest.raises(SystemExit): main(['--report','missing-report.json'])
+
+
+@pytest.mark.parametrize('mutation', ['missing','duplicate','candidate','reason','label','identity','nonfinite'])
+def test_relevance_fit_rejects_unreliable_annotations(mutation):
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,annotations=relevance_fixture(); labels=annotations['labels']
+    if mutation=='missing': labels.pop()
+    if mutation=='duplicate': labels.append(labels[0].copy())
+    if mutation=='candidate': labels[0]['candidate_id']=999
+    if mutation=='reason': labels[0]['reason']='  '
+    if mutation=='label': labels[0]['relevant']=1
+    if mutation=='identity': annotations['identity']={'run':'other'}
+    if mutation=='nonfinite':
+        report['rows'][0]['candidates'][0]['score']=float('nan')
+        bind_checkpoint(report,annotations)
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+
+
+def test_relevance_fit_handles_empty_candidates_and_rejects_wrong_strategy_inventory():
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,annotations=relevance_fixture()
+    for row,label in zip(report['rows'],annotations['labels']):
+        if row['eval_id']=='unrelated':
+            row['candidates']=[];label['candidate_id']=None
+    bind_checkpoint(report,annotations)
+    assert fit_relevance_policy(report,annotations).thresholds['dense']==pytest.approx(.2)
+    annotations['labels'][2]['relevant']=True
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+
+
+def test_relevance_fit_rejects_single_class_and_test_split():
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,annotations=relevance_fixture()
+    for label in annotations['labels']: label['relevant']=True
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+
+
+def test_relevance_fit_rejects_score_changed_after_annotation():
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,annotations=relevance_fixture()
+    report['rows'][0]['candidates'][0]['score']=.001
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+
+
+def test_relevance_fit_rejects_omitting_same_question_from_every_strategy():
+    from scripts.calibrate_rag import fit_relevance_policy
+    report,annotations=relevance_fixture()
+    report['rows']=[r for r in report['rows'] if r['eval_id']!='unrelated']
+    annotations['labels']=[r for r in annotations['labels'] if r['eval_id']!='unrelated']
+    for label in annotations['labels']:
+        if label['eval_id']=='answerable': label['relevant']=False
+    bind_checkpoint(report,annotations)
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+    report,annotations=relevance_fixture();report['split']='test'
+    with pytest.raises(ValueError): fit_relevance_policy(report,annotations)
+
+
 def test_evaluation_policy_and_hash_are_frozen_from_same_bytes(tmp_path):
     import json
     from hashlib import sha256
@@ -34,6 +122,28 @@ def test_policy_identity_changes_when_normalization_code_changes(monkeypatch):
         return content+b'\n# changed' if path.name=='query.py' else content
     monkeypatch.setattr(Path,'read_bytes',changed)
     assert policy_identity(settings,snapshot,'dense')!=before
+
+
+@pytest.mark.parametrize('changed_file',['retrieval.py','milvus_store.py','embedding.py','text.py'])
+def test_relevance_policy_rejects_retrieval_code_drift_without_breaking_legacy(tmp_path, monkeypatch, changed_file):
+    import json
+    from pathlib import Path
+    from types import SimpleNamespace
+    from retailq.config import Settings
+    from retailq.errors import ServiceError
+    from retailq.knowledge.policy import DynamicConfidencePolicy, policy_identity
+    settings=Settings(_env_file=None,rag_confidence_path=str(tmp_path/'policy.json'))
+    snapshot=SimpleNamespace(corpus_hash='abc')
+    result=SimpleNamespace(strategy='hybrid_rerank',snapshot=snapshot,candidates=[SimpleNamespace(score=.5)])
+    identity=policy_identity(settings,snapshot,'hybrid_rerank',version=2)
+    (tmp_path/'policy.json').write_text(json.dumps({'identity':identity,'calibrated':True,'thresholds':{'hybrid_rerank':.4}}),encoding='utf-8')
+    assert DynamicConfidencePolicy(settings).allows(result)
+    original=Path.read_bytes
+    def changed(path):
+        data=original(path)
+        return data+b'\n# drift' if path.name==changed_file else data
+    monkeypatch.setattr(Path,'read_bytes',changed)
+    with pytest.raises(ServiceError): DynamicConfidencePolicy(settings).allows(result)
 
 
 def calibration_rows():

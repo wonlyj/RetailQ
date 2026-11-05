@@ -37,8 +37,12 @@ def reset_isolated_database(settings):
     if not all(inspect(database.engine).has_table(name) for name in ('low_confidence_questions', 'faith_cases')):
         from scripts.migrate_rag import migrate_rag
         migrate_rag(database, Path('db/init/04-rag.sql'))
+    from scripts.migrate_workflow import migrate_workflow
+    migrate_workflow(database,Path('db/init/05-workflow.sql'))
     with database.sessions.begin() as session:
         inspector = inspect(session.connection())
+        for name in ('workflow_actions','workflow_turns'):
+            session.execute(text(f'DELETE FROM {name}'))
         for name in ('low_confidence_questions', 'faith_cases'):
             if inspector.has_table(name):
                 session.execute(text(f'DELETE FROM {name}'))

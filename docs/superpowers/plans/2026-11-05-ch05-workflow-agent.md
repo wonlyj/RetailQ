@@ -104,7 +104,7 @@ def test_fixed_routes_and_passthrough():
 
 **Interfaces:** `WorkflowRepository.start_turn(body:ChatRequest)->TurnRef` 同事务创建/校验会话、导入历史、写user及turn；`.load_projection(cid:int,user_id:str,*,before_message_id:int|None=None)->list[list[BaseMessage]]`；`.record_tool_request(turn:TurnRef,selection:AIMessage)->int`；`.record_tool_result(turn:TurnRef,call_id:str,payload:dict)->int`；`.finalize(turn:TurnRef,state:WorkflowState)->FinalizedTurn`；`.mark_terminal(turn:TurnRef,status:str,code:str|None)->None`；`.load_citations(cid:int,user_id:str,evidence_id:str)->tuple[CitationRecord,...]`；`.list_actions(cid:int,user_id:str,message_id:int)->tuple[dict,...]`。所有同步短事务，async调用在线程内执行。
 
-- [ ] 写真实隔离 MySQL 红测试：finalize 重入同一turn仅1条助手/低置信记录/每类动作；不同最终载荷冲突报409；finalize中途失败整体回滚；大小写不同 call ID 不合并，重复同ID仅一回执；跨用户/跨会话拒绝。新 schema 先由独立显式迁移测试创建，不以 ORM create_all 代替DDL验证。
+- [x] 写真实隔离 MySQL 红测试：finalize 重入同一turn仅1条助手/低置信记录/每类动作；不同最终载荷冲突报409；finalize中途失败整体回滚；大小写不同 call ID 不合并，重复同ID仅一回执；跨用户/跨会话拒绝。新 schema 先由独立显式迁移测试创建，不以 ORM create_all 代替DDL验证。
 
 ```python
 def test_finalize_same_turn_is_idempotent(repo, turn, low_conf_state):
@@ -112,12 +112,12 @@ def test_finalize_same_turn_is_idempotent(repo, turn, low_conf_state):
     assert repo.finalize(turn, low_conf_state).message_id == first.message_id
     # 用实际SQL断言该turn只有1条最终助手消息、1条关联低置信记录。
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_schema.py tests/test_workflow_repository.py -q` 确认红；若数据库不可达先恢复隔离环境，不绕过集成测试。
-- [ ] 实现两张表、DDL摘要/字段/索引/外键校验及 `python -m scripts.migrate_workflow --scope test|demo`（只允许本机3307/retailq_test 或3306/retailq；首次不支持任意目标，其他环境需独立显式迁移方案）。幂等检查不改旧表结构、不清数据。新表主键为字符串，不能直接套用旧knowledge迁移器“主键id自增”的verify；独立验证实际主键/非自增类型。测试清理先workflow_actions/turns再旧消息表，保留已有测试库防误删护栏；schema漂移不静默ALTER。
-- [ ] 实现 finalize 原子保存正文、证据快照、动作建议及可选低置信池ID；turn状态为 completed/limited，错误为 failed/interrupted。相同turn+相同结果重入返回原ID；低置信池不新增列。证据 ID `wf_<turn_id>` 仅用于工作流来源，不塞进旧 tool_call_id。record_tool_request/result 在turn行锁下按call ID记录消息ID，可重入且内容不一致拒绝。
-- [ ] start_turn后加载历史必须传 `before_message_id=turn.user_message_id`，再追加当前用户一次；写测试断言模型输入当前问题仅出现一次。mark_terminal不得覆盖已有completed/limited及final_message_id，checkpoint落后仍保留SQL已提交终态。
-- [ ] 写旧按钮来源投影测试：另一个自然语言轮后写 user_action 申请/回执，投影只有一次确定性工单事实、保留 origin_assistant_message_id，不伪造模型调用；失败/unknown写成“结果尚未确认”而非成功。load_projection 再交现有完整轮预算裁剪。
-- [ ] 运行本任务测试及 `tests/test_context.py tests/test_tool_context.py tests/test_repositories.py tests/test_rag_repository.py`；逐阶段留痕并提交 `feat: persist workflow turns evidence and actions`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_schema.py tests/test_workflow_repository.py -q` 确认红；若数据库不可达先恢复隔离环境，不绕过集成测试。
+- [x] 实现两张表、DDL摘要/字段/索引/外键校验及 `python -m scripts.migrate_workflow --scope test|demo`（只允许本机3307/retailq_test 或3306/retailq；首次不支持任意目标，其他环境需独立显式迁移方案）。幂等检查不改旧表结构、不清数据。新表主键为字符串，不能直接套用旧knowledge迁移器“主键id自增”的verify；独立验证实际主键/非自增类型。测试清理先workflow_actions/turns再旧消息表，保留已有测试库防误删护栏；schema漂移不静默ALTER。
+- [x] 实现 finalize 原子保存正文、证据快照、动作建议及可选低置信池ID；turn状态为 completed/limited，错误为 failed/interrupted。相同turn+相同结果重入返回原ID；低置信池不新增列。证据 ID `wf_<turn_id>` 仅用于工作流来源，不塞进旧 tool_call_id。record_tool_request/result 在turn行锁下按call ID记录消息ID，可重入且内容不一致拒绝。
+- [x] start_turn后加载历史必须传 `before_message_id=turn.user_message_id`，再追加当前用户一次；写测试断言模型输入当前问题仅出现一次。mark_terminal不得覆盖已有completed/limited及final_message_id，checkpoint落后仍保留SQL已提交终态。
+- [x] 写旧按钮来源投影测试：另一个自然语言轮后写 user_action 申请/回执，投影只有一次确定性工单事实、保留 origin_assistant_message_id，不伪造模型调用；失败/unknown写成“结果尚未确认”而非成功。load_projection 再交现有完整轮预算裁剪。
+- [x] 运行本任务测试及 `tests/test_context.py tests/test_tool_context.py tests/test_repositories.py tests/test_rag_repository.py`；逐阶段留痕并提交 `feat: persist workflow turns evidence and actions`。
 
 ### T4：强制检索、前置闸与引用契约
 

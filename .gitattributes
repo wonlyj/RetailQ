@@ -1,1 +1,2 @@
 db/init/04-rag.sql -text
+db/init/05-workflow.sql -text

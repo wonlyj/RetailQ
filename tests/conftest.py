@@ -2,6 +2,7 @@ import pytest
 import sys
 import retailq.knowledge.models  # Load all six mappings even in isolated tests.
 import retailq.knowledge.rag_models  # Register chapter-four mappings for schema checks.
+import retailq.workflow.models
 
 from tests.support.database import test_database
 from tests.support.milvus import standalone_store_settings

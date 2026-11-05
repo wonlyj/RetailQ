@@ -125,6 +125,19 @@ class OpenAIModelGateway:
     def stream_answer(self, messages, *, max_tokens: int):
         return self.stream(messages,max_tokens=max_tokens)
 
+    async def classify_intent(self,messages,*,max_tokens: int):
+        from retailq.workflow.classification import parse_intent
+        try:
+            async with asyncio.timeout(self.settings.model_timeout_seconds):
+                response = await self.model.ainvoke(messages,max_tokens=max_tokens,temperature=0)
+            if (response.tool_calls or response.invalid_tool_calls or response.additional_kwargs.get('tool_calls')
+                    or response.response_metadata.get('finish_reason') != 'stop' or not isinstance(response.content,str)):
+                raise ServiceError('intent_output_invalid',502,'模型意图输出不完整或包含工具申请。')
+            require_plain_model_text(response.content)
+            return parse_intent(response.content),usage_charge(response.usage_metadata)
+        except Exception as exc:
+            raise public_error(exc) from None
+
     async def stream(self, messages: list[BaseMessage], *, max_tokens: int | None = None) -> AsyncIterator[ModelChunk]:
         seen_text = False
         seen_finish = False

@@ -85,7 +85,7 @@ async def test_bare_agent_two_tools_then_real_stream(controlled_run):
 
 **Interfaces:** `resolve_reference(question:str)->str` 原样返回；`route_intent(intent:str)->str` 固定映射；`IntentClassifier.classify(state:WorkflowState)->dict` async 调用 classify_intent 并计入账本；分类网关输出只含 `{"intent":"物流"}` 等严格对象，无工具、无未知键。
 
-- [ ] 写 parser/route 可测逻辑的红测试：七类逐一断言出口；未知枚举/重复键/代码围栏/截断/工具输出/非stop拒绝，不能默认送 Agent；`resolve_reference('它到了吗') == '它到了吗'`。同义词分类本身不写假单测。
+- [x] 写 parser/route 可测逻辑的红测试：七类逐一断言出口；未知枚举/重复键/代码围栏/截断/工具输出/非stop拒绝，不能默认送 Agent；`resolve_reference('它到了吗') == '它到了吗'`。同义词分类本身不写假单测。
 
 ```python
 def test_fixed_routes_and_passthrough():
@@ -93,10 +93,10 @@ def test_fixed_routes_and_passthrough():
     assert route_intent('物流') == 'business'
     assert resolve_reference('它到了吗') == '它到了吗'
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_classification.py -q` 确认红，实现严格解析、固定映射和一次分类调用；分类输出256 token 上限，Prompt/历史输入先计预算，固定话术不得再调用模型。
-- [ ] 编写并人工核对21条意图标注（七类各3条，含情绪、缺订单号、退款政策与维修售后区分、恶意指令）；另12条端到端样例覆盖五项用户验收、弱证据、退款后查订单、缺参、Agent建议、缺失政策事实、注入、工单确认。记录来源/预期节点/允许工具/禁止副作用，T8运行前冻结SHA-256，不用这些样例拟合新检索门槛。
-- [ ] 运行逻辑绿测试；Prompt/数据阶段的验证是逐项标注核对和 T8 真实模型评估，尚未真实运行不得写“分类质量通过”。最终回答 Prompt 注入独立证据/工具数据、严格 actions 控制示例、演示数据标识和缺失事实拒答约束。
-- [ ] 立即留痕并提交 `feat: add seven-intent workflow routing`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_classification.py -q` 确认红，实现严格解析、固定映射和一次分类调用；分类输出256 token 上限，Prompt/历史输入先计预算，固定话术不得再调用模型。
+- [x] 编写并人工核对21条意图标注（七类各3条，含情绪、缺订单号、退款政策与维修售后区分、恶意指令）；另12条端到端样例覆盖五项用户验收、弱证据、退款后查订单、缺参、Agent建议、缺失政策事实、注入、工单确认。记录来源/预期节点/允许工具/禁止副作用，T8运行前冻结SHA-256，不用这些样例拟合新检索门槛。
+- [x] 运行逻辑绿测试；Prompt/数据阶段的验证是逐项标注核对和 T8 真实模型评估，尚未真实运行不得写“分类质量通过”。最终回答 Prompt 注入独立证据/工具数据、严格 actions 控制示例、演示数据标识和缺失事实拒答约束。
+- [x] 立即留痕并提交 `feat: add seven-intent workflow routing`。
 
 ### T3：MySQL 运行记录、证据与动作持久化
 

@@ -15,7 +15,7 @@ def retrieval_metrics(ranked_ids, relevant_groups, ks=(1, 3, 5, 10)):
         return RetrievalMetrics({k: None for k in ks}, None)
     ranks = tuple(ranked_ids)
     recall = {k: sum(bool(group.intersection(ranks[:k])) for group in groups) / len(groups) for k in ks}
-    first = next((i for i, item in enumerate(ranks, 1) if any(item in group for group in groups)), None)
+    first = next((i for i, item in enumerate(ranks[:10], 1) if any(item in group for group in groups)), None)
     return RetrievalMetrics(recall, 1 / first if first else 0.0)
 
 

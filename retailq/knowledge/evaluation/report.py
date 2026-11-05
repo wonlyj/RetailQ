@@ -18,20 +18,29 @@ def _aggregate(rows):
     claims=[c for row in done for c in row.get('claims',[])]
     supported=sum(c['supported'] for c in claims)
     answers=[r for r in done if r.get('status')=='answered']
+    answerable=[r for r in done if r.get('answerable') is True and r.get('status') in ('answered','refused')]
+    unanswerable=[r for r in done if r.get('answerable') is False and r.get('status') in ('answered','refused')]
+    answerable_refusals=sum(r.get('status')=='refused' for r in answerable)
+    unanswerable_refusals=sum(r.get('status')=='refused' for r in unanswerable)
+    cited=sum(bool(r.get('citations')) for r in answers)
+    judged=sum(r.get('judge_completed') is True for r in answers)
     latencies=[r['elapsed_seconds'] for r in done if not r.get('latency_incomplete') and r.get('elapsed_seconds') is not None]
     return {'rows':len(rows),'completed':len(done),'answered':len(answers),
             'refused':sum(r.get('status')=='refused' for r in done),
             'faults':sum(r.get('status')=='error' for r in done),
+            'answerable_completed':len(answerable),'answerable_refusals':answerable_refusals,
+            'answerable_refusal_rate':answerable_refusals/len(answerable) if answerable else None,
+            'unanswerable_completed':len(unanswerable),'unanswerable_refusals':unanswerable_refusals,
+            'unanswerable_refusal_rate':unanswerable_refusals/len(unanswerable) if unanswerable else None,
             'recall':{k:_mean(v) for k,v in recalls.items()},
             'mrr':_mean(r.get('metrics',{}).get('mrr') for r in done),
             'recall_at_50':_mean(r.get('candidate50_metrics',{}).get('recall',{}).get('50') for r in done),
-            'full_evidence_coverage':_mean(1.0 if r.get('evidence_coverage') == 1.0 else 0.0
-                for r in done if r.get('evidence_coverage') is not None),
+            'full_evidence_coverage':_mean(r.get('multi_evidence_full_coverage') for r in done),
             'faithfulness_macro':_mean(r.get('faithfulness') for r in answers),
             'faithfulness_micro':supported/len(claims) if claims else None,
             'judge_claims':len(claims),'judge_supported':supported,
-            'judge_answered':sum(r.get('faithfulness') is not None for r in answers),
-            'cited_answers':sum(bool(r.get('citations')) for r in answers),
+            'judge_answered':judged,'judge_coverage':judged/len(answers) if answers else None,
+            'cited_answers':cited,'citation_coverage':cited/len(answers) if answers else None,
             'latency_mean_seconds':_mean(latencies),'latency_samples':len(latencies)}
 
 

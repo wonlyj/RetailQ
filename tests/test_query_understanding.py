@@ -26,6 +26,41 @@ def test_bm25_retains_original_words_when_rewritten():
     assert '邮费咋算？' in result.bm25_query and '运费' in result.bm25_query
 
 
+def test_normalization_service_failure_falls_back_to_original_before_deadline():
+    from retailq.errors import ServiceError
+    def unavailable(raw,deadline):raise ServiceError('knowledge_query_understanding_failed',503,'服务失败')
+    result=QueryNormalizer(unavailable,{}).understand('AB123 参数？',deadline=time.monotonic()+5)
+    assert result.normalized_query=='AB123 参数？' and result.fallback_reason=='normalization_failed'
+
+
+def test_normalization_failure_does_not_bypass_expired_deadline(monkeypatch):
+    from retailq.errors import ServiceError
+    ticks=iter([0.0,2.0])
+    monkeypatch.setattr(time,'monotonic',lambda:next(ticks))
+    def unavailable(raw,deadline):raise ServiceError('knowledge_query_understanding_failed',503,'服务失败')
+    with pytest.raises(ServiceError) as error:
+        QueryNormalizer(unavailable,{}).understand('问题',deadline=1.0)
+    assert error.value.code=='knowledge_query_timeout'
+
+
+def test_normalization_preserves_unhyphenated_model_identifier():
+    result=QueryNormalizer(lambda raw,deadline:'CD123 参数？',{}).understand('AB123 参数？',deadline=time.monotonic()+5)
+    assert result.normalized_query=='AB123 参数？' and result.fallback_reason=='literal_constraint_lost'
+
+
+@pytest.mark.parametrize(('raw','changed'),[
+    ('MH-LP100 参数？','MH-LP1000 参数？'),
+    ('AB123 参数？','AB1234 参数？'),
+    ('123AB 参数？','123CD 参数？'),
+    ('8元运费？','18元运费？'),
+    ('长度5米是多少？','长度5厘米是多少？'),
+    ('温度38℃可以吗？','温度38摄氏度可以吗？'),
+])
+def test_constraints_match_complete_tokens_not_prefixes(raw,changed):
+    result=QueryNormalizer(lambda question,deadline:changed,{}).understand(raw,deadline=time.monotonic()+5)
+    assert result.normalized_query==raw and result.fallback_reason=='literal_constraint_lost'
+
+
 def test_labeled_query_examples():
     import json
     from pathlib import Path

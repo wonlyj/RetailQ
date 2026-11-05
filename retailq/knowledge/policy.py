@@ -8,14 +8,17 @@ from retailq.knowledge.answer import ConfidencePolicy
 def policy_identity(settings, snapshot, strategy):
     project = Path(__file__).resolve().parents[2]
     prompt = (project / 'retailq/prompts/rag_answer.txt').read_bytes()
+    judge_prompt = (project / 'retailq/knowledge/evaluation/judge.py').read_bytes()
     query = (project / 'retailq/prompts/query_normalize.txt').read_bytes()
+    query_code = (project / 'retailq/knowledge/query.py').read_bytes()
     synonyms = (project / 'examples/knowledge/synonyms.json').read_bytes()
-    model_identity = '|'.join((settings.embedding_model, settings.rerank_model if strategy == 'hybrid_rerank' else '-',
+    model_identity = '|'.join((settings.embedding_model, settings.rerank_model,
                                settings.openai_model, settings.embedding_base_url.rstrip('/'), settings.rerank_base_url.rstrip('/'),
-                               settings.openai_base_url.rstrip('/')))
+                               settings.openai_base_url.rstrip('/'), settings.structured_output_method,
+                               str(settings.input_budget), str(settings.max_output_tokens)))
     return {'model':model_identity,
-            'corpus_hash':snapshot.corpus_hash, 'prompt_hash':sha256(prompt).hexdigest(),
-            'query_hash':sha256(query + b'\0' + synonyms).hexdigest(), 'strategy':strategy}
+            'corpus_hash':snapshot.corpus_hash, 'prompt_hash':sha256(prompt + b'\0' + judge_prompt).hexdigest(),
+            'query_hash':sha256(query + b'\0' + query_code + b'\0' + synonyms).hexdigest(), 'strategy':'all'}
 
 
 class DynamicConfidencePolicy:
@@ -26,3 +29,14 @@ class DynamicConfidencePolicy:
         path=Path(self.settings.rag_confidence_path)
         if not path.is_absolute(): path=Path(__file__).resolve().parents[2]/path
         return ConfidencePolicy.load(path,expected_identity=identity).allows(result)
+
+
+def freeze_evaluation_policy(settings, snapshot):
+    path=Path(settings.rag_confidence_path)
+    if not path.is_absolute(): path=Path(__file__).resolve().parents[2]/path
+    try:
+        raw=path.read_bytes()
+    except OSError:
+        from retailq.errors import ServiceError
+        raise ServiceError('rag_policy_unavailable',503,'知识置信度配置缺失或与当前版本不一致，请先完成校准。') from None
+    return ConfidencePolicy.from_bytes(raw,expected_identity=policy_identity(settings,snapshot,'all')),sha256(raw).hexdigest()

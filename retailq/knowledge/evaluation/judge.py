@@ -73,6 +73,8 @@ class FaithfulnessJudge:
         payload=json.dumps({'answer':answer,'evidence':evidence},ensure_ascii=False)
         messages=[SystemMessage(content='逐条提取回答中的事实断言，按提供的证据判断是否支持。只返回 JSON 对象：'
                    '{"claims":[{"text":"回答中的原句片段","supported":true或false,"citations":[证据编号],"reason":"缺证或冲突原因"}]}。'
+                   '每个 text 必须是回答中逐字连续出现的原文片段，不得改写、补字、删字拼接或换同义词；'
+                   '若一句包含多个相关条件，无法逐字拆分时保留整句，只要其中有无证据或冲突的部分就判为不支持。'
                    '支持的断言必须提供对应证据编号；不支持必须说明原因。不要推测证据外的事实。'),HumanMessage(content=payload)]
         if self.invoke is not None:
             value=await self.invoke(messages)

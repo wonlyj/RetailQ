@@ -44,3 +44,18 @@ async def test_invented_category_is_not_silently_applied():
     registry = build_registry(Repository(), context, Settings(_env_file=None))
     outcome = await registry.execute({'name':'query_faq','args':{'keyword':'运费', 'category':'智能猫砂盆'},'id':'tool'})
     assert not outcome.payload['ok']
+
+
+@pytest.mark.parametrize(('question','expected'),[
+    ('MH-LP100适用猫咪体重是多少？',None),
+    ('请只查FAQ，MH-LP100适用猫咪体重是多少？','faq'),
+])
+async def test_unconfirmed_content_type_does_not_narrow_retrieval(question,expected):
+    calls=[]
+    class Repository:
+        def rag_retrieve(self, raw, **kwargs):
+            calls.append(kwargs)
+            return retrieval(1)
+    registry=build_registry(Repository(),ToolContext(1,'u','tool',raw_question=question),Settings(_env_file=None))
+    outcome=await registry.execute({'name':'query_faq','args':{'keyword':'MH-LP100','content_type':'faq'},'id':'tool'})
+    assert outcome.payload['ok'] and calls[0]['content_type']==expected

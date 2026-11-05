@@ -72,11 +72,13 @@ class EvaluationRunner:
                     ranked=[h.id for h in result.candidate_hits]
                     if strategy=='hybrid_rerank': ranked=[c.id for c in result.candidates]
                     metrics=retrieval_metrics(ranked,mapped.groups)
+                    multi_full=(float(all(bool(group.intersection(ranked[:10])) for group in mapped.groups))
+                                if len(mapped.groups)>1 else None)
                     current={'eval_id':case.eval_id,'bucket':case.bucket,'difficulty':case.difficulty,'split':split,
                          'strategy':strategy,'phase':'retrieval','candidate_hits':_plain(result.candidate_hits),
                          'ranked_ids':ranked,'metrics':_plain(metrics),'candidates':_plain(result.candidates),
                          'candidate50_metrics':_plain(retrieval_metrics([h.id for h in result.candidate_hits],mapped.groups,ks=(50,))),
-                         'answerable':case.answerable,'filters':case.filters}
+                         'answerable':case.answerable,'filters':case.filters,'multi_evidence_full_coverage':multi_full}
                     self.store.checkpoint(current)
                 else:
                     candidates=tuple(EvidenceChunk(c['id'],ChunkDraft(**c['draft']),c['rank'],c['score']) for c in current['candidates'])
@@ -111,7 +113,7 @@ class EvaluationRunner:
                 if current['phase']=='generation':
                     judged=await self._guarded(case.eval_id,strategy,'judging',lambda:self.judge.judge(decision.answer,bundle.citations))
                     self.store.checkpoint({'eval_id':case.eval_id,'strategy':strategy,'phase':'judging',
-                        'faithfulness':judged.score,'claims':_plain(judged.claims)})
+                        'faithfulness':judged.score,'claims':_plain(judged.claims),'judge_completed':True})
                 else:
                     from retailq.knowledge.evaluation.judge import JudgeResult
                     judged=JudgeResult(tuple(current['claims']),current['faithfulness'])

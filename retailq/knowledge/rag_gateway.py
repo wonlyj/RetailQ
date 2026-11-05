@@ -4,6 +4,7 @@ import json
 import warnings
 
 import httpx
+import openai
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import ChatOpenAI
 
@@ -56,6 +57,10 @@ class OpenAIRAGGateway:
             return strict
         except ServiceError:
             raise
+        except openai.APITimeoutError:
+            raise ServiceError('upstream_timeout', 504, '模型响应超时，请稍后重试。') from None
+        except (openai.APIConnectionError, openai.APIStatusError):
+            raise ServiceError('upstream_unavailable', 503, '模型服务暂时不可用，请稍后重试。') from None
         except TimeoutError:
             raise ServiceError('upstream_timeout', 504, '模型响应超时，请稍后重试。') from None
         except Exception:

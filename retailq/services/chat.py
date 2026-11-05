@@ -34,6 +34,15 @@ class ChatEvent:
     data: dict
 
 
+def rag_tool_receipt(payload, bundle):
+    selected={citation.chunk_id for citation in bundle.citations} if bundle else set()
+    items=[item for item in payload['data']['items'] if item['id'] in selected]
+    receipt={**payload,'data':{**payload['data'],'found':bool(items),'items':items}}
+    receipt['rag_evidence']={'bundle_hash':bundle.bundle_hash if bundle else None,
+                             'citations':[asdict(c) for c in bundle.citations] if bundle else []}
+    return receipt
+
+
 class ChatService:
     """One process, one active turn per conversation; transactions stay short."""
     def __init__(self, repository, gateway, settings, *, rag_gateway=None, rag_repository=None, confidence_policy=None, coordinator=None):
@@ -149,9 +158,7 @@ class ChatService:
         if allowed:
             prompt = (Path(__file__).resolve().parents[1] / 'prompts' / 'rag_answer.txt').read_text(encoding='utf-8')
             bundle = prepare_bundle(result, system_prompt=prompt, input_budget=self.settings.input_budget)
-        receipt = dict(outcome.payload)
-        receipt['rag_evidence'] = {'bundle_hash':bundle.bundle_hash if bundle else None,
-                                   'citations':[asdict(c) for c in bundle.citations] if bundle else []}
+        receipt = rag_tool_receipt(outcome.payload,bundle)
         content = json.dumps(receipt,ensure_ascii=False)
         await self._write(self.repository.append_message,turn.conversation_id,turn.user_id,'tool',content,None,call['id'])
         yield ChatEvent('tool_status',{'tool_call_id':call['id'],'name':call['name'],'status':'completed'})

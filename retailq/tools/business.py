@@ -35,6 +35,9 @@ def business_tools(repository, context):
             if not context.raw_question: raise ServiceError('rag_context_missing', 409, '缺少当前用户问题。')
             if (category and category not in context.raw_question) or (category_prefix and category_prefix not in context.raw_question):
                 raise ServiceError('rag_filter_unconfirmed', 422, '品类过滤条件未由用户明确提供。')
+            type_words={'faq':('faq','常见问题'), 'policy':('policy','政策'), 'manual':('manual','手册')}
+            if content_type and not any(word in context.raw_question.lower() for word in type_words[content_type]):
+                content_type = None
             retrieve = getattr(repository, 'retrieve_knowledge', repository.rag_retrieve)
             result = await asyncio.to_thread(retrieve, context.raw_question, category=category,
                                              category_prefix=category_prefix, content_type=content_type)

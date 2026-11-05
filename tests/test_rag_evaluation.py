@@ -4,6 +4,29 @@ import pytest
 from retailq.knowledge.evaluation.judge import validate_judgement
 
 
+def test_report_distinguishes_answerable_refusals_and_missing_correct_refusals():
+    from retailq.knowledge.evaluation.report import _aggregate
+    rows=[{'phase':'complete','status':'refused','answerable':True},
+          {'phase':'complete','status':'answered','answerable':True,'citations':[1],'faithfulness':1,'judge_completed':True},
+          {'phase':'complete','status':'refused','answerable':False},
+          {'phase':'retrieval','answerable':False}]
+    summary=_aggregate(rows)
+    assert summary['answerable_refusals']==1 and summary['answerable_completed']==2
+    assert summary['answerable_refusal_rate']==0.5
+    assert summary['unanswerable_refusals']==1 and summary['unanswerable_completed']==1
+    assert summary['unanswerable_refusal_rate']==1
+    assert summary['citation_coverage']==1 and summary['judge_coverage']==1
+
+
+def test_completed_judge_with_no_claims_is_covered_but_has_no_faithfulness_score():
+    from retailq.knowledge.evaluation.report import _aggregate
+    row={'phase':'complete','status':'answered','answerable':True,'citations':[1],
+         'faithfulness':None,'judge_completed':True,'claims':[]}
+    summary=_aggregate([row])
+    assert summary['judge_answered']==1 and summary['judge_coverage']==1
+    assert summary['faithfulness_macro'] is None and summary['faithfulness_micro'] is None
+
+
 def test_judge_rejects_references_outside_evidence():
     with pytest.raises(ValueError):
         validate_judgement({'claims':[{'text':'x','supported':True,'citations':[2],'reason':''}]},
@@ -79,6 +102,28 @@ async def test_runner_uses_one_understanding_and_same_snapshot_for_four_strategi
     assert len(store.rows())==4
     assert all(row['faithfulness'] is None and row['phase']=='complete' for row in store.rows())
     assert all(row['evidence_coverage']==1 for row in store.rows())
+
+
+@pytest.mark.anyio
+async def test_runner_records_multi_group_coverage_before_confidence_refusal(tmp_path):
+    from pathlib import Path
+    from retailq.knowledge.evaluation.contracts import read_cases, MappedCase
+    from retailq.knowledge.evaluation.runner import EvaluationRunner
+    from retailq.knowledge.evaluation.store import EvaluationStore
+    from retailq.knowledge.retrieval_contracts import QueryUnderstanding, RawHit
+    case=next(c for c in read_cases(Path('evals/ch04_cases.jsonl')) if c.eval_id=='E05')
+    snapshot=SimpleNamespace(corpus_hash='frozen')
+    def normalize(question,*,deadline):return QueryUnderstanding(question,question,question)
+    def retrieve(query,snap,strategy,filters,*,deadline):
+        candidates=(SimpleNamespace(id=7,rank=1,score=.9),SimpleNamespace(id=8,rank=2,score=.8))
+        return SimpleNamespace(candidates=candidates,candidate_hits=(RawHit(7,.9,'a'),RawHit(8,.8,'b')),snapshot=snap,strategy=strategy)
+    class Reject:
+        def allows(self,result):return False
+    store=EvaluationStore.open_new(tmp_path/'run',{'corpus':'frozen'})
+    runner=EvaluationRunner(snapshot=snapshot,normalize=normalize,retrieve=retrieve,gateway=None,judge=None,
+                            bundle_factory=None,store=store,policy=Reject())
+    await runner.run([MappedCase(case,(frozenset({7}),frozenset({8})))],split='test')
+    assert all(r['status']=='refused' and r['multi_evidence_full_coverage']==1 for r in store.rows())
 
 
 @pytest.mark.anyio

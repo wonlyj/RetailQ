@@ -1,6 +1,6 @@
 # RetailQ · 客服聊天工具链
 
-当前提供客服聊天、BGE-M3/Milvus Lite语义知识检索和[知识审核工作台](docs/ch03-knowledge-console.md)：可视化挖掘历史对话、人工选分类后发布、逐来源追踪chunk去向。页面入口 `/knowledge`。本地协议与存储测试已验证；新版分类Prompt、真实云端语义和业务验收仍待用户反馈。
+当前提供客服聊天、Milvus Standalone 混合知识检索和[知识审核工作台](docs/ch03-knowledge-console.md)：使用 BGE-M3 向量与 Milvus 原生中文 BM25 召回、RRF 融合及 bge-reranker-v2-m3 重排，回答可查看引用来源。页面入口 `/knowledge`。第四章真实四策略评估已完成，结果和已发现的口语问法误拒问题见[评估说明](docs/ch04-evaluation.md)；人工体验反馈仍待收集。
 
 Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现有 SSE 聊天页接入 Function Calling：模型选择一个工具，执行、回灌结果，再生成真正的流式答复。保留第 1 章售后结构化提取。
 
@@ -9,12 +9,12 @@ Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现�
 | 工具 | 数据来源 |
 | --- | --- |
 | query_order / query_product / query_logistics | 工具内部随机生成的演示数据，不接真实电商或物流接口，不建对应表 |
-| query_faq | 知识就绪时：BGE-M3 dense单路检索Milvus，MySQL知识原文确证；工具入出参不变。关闭或未就绪时明确不可用；第2章LIKE仅为历史基线，无自动回退 |
+| query_faq | 知识就绪时：混合召回、重排并用 MySQL 确认知识内容；证据不足时拒答。关闭或未就绪时明确不可用，第2章 LIKE 仅为历史基线 |
 | create_ticket | 写入 tickets，关联当前会话并更新为已转人工；不表示即时接通人工或完成退款 |
 
-每次用户消息最多执行一个业务工具，没有Agent Loop。知识检索只跑dense单路，不加关键词召回、混合检索或重排。第一次模型请求绑定工具；第二次请求不提供工具，逐上游文本增量转发。工具参数由Pydantic严格校验；读工具超时/临时连接错误最多重试一次，工单写入不自动重试。写入超时只能说明结果未确认，成功工单及回执会保留。
+每次用户消息最多执行一个业务工具，没有 Agent Loop。知识回答使用证据自评及来源编号；普通工具回复仍经模型生成。工具参数由 Pydantic 校验；工单写入不自动重试，写入超时表示结果尚未确认。
 
-本项目面向本机演示，监听 127.0.0.1、单 Uvicorn worker。浏览器 user_id 是本地演示身份，不是登录鉴权；不能作为公网生产系统直接部署。
+本项目面向本机演示，监听 127.0.0.1，可使用多个 Uvicorn worker。浏览器 user_id 是本地演示身份，不是登录鉴权；不能作为公网生产系统直接部署。
 
 ## 安装与配置（Windows PowerShell）
 
@@ -60,8 +60,8 @@ TOOL_READ_RETRIES=1
 ## 启动与浏览器演示
 
 ```powershell
-docker compose -p retailq -f compose.yaml up -d --wait mysql
-& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000 --workers 1
+docker compose -p retailq -f compose.yaml up -d --wait mysql milvus
+& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000 --workers 2
 ```
 
 打开 [本机聊天页](http://127.0.0.1:8000/)，依次输入：
@@ -70,7 +70,7 @@ docker compose -p retailq -f compose.yaml up -d --wait mysql
 2. `退货政策是什么`：query_faq 命中演示退货规则。
 3. `邮费是多少`：开启知识功能、完成运费知识向量化后，应语义召回运费演示规则并保留例外条件。第2章LIKE基线曾漏召回“邮费”，历史报告仍保留该时期结果。
 
-知识启动配置、浏览器审核演示、分类评估和真实kill恢复命令见[工作台指南](docs/ch03-knowledge-console.md)；文档建库与真实BGE验收见[第3章清单](docs/ch03-manual-acceptance.md)。默认关闭定时挖掘；网页、CLI和显式启用的scheduler都只准备待审核知识，通过后才发布。
+第四章知识建库及校准配置见[混合检索指南](docs/ch04-hybrid-rag.md)。第3章[工作台指南](docs/ch03-knowledge-console.md)和[验收清单](docs/ch03-manual-acceptance.md)保留历史流程，其中 Milvus Lite 配置不适用于第四章。默认关闭定时挖掘；网页、CLI和显式启用的scheduler都只准备待审核知识，通过后才发布。
 
 还可查询商品编号 2001、订单 001001，或说明配送问题后明确要求创建投诉工单。气泡显示工具执行中/完成/失败；停止或刷新不会撤销已提交的工单。支持新建/切换对话、复制、停止和移动端侧栏。
 

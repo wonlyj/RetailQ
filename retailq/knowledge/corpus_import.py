@@ -177,6 +177,12 @@ class CorpusImporter:
     def _existing(self, plan, approved_ids):
         rows = self.repository.all_chunks()
         by_source = {source.key: source for source in plan.sources}
+        previous = None
+        if self.corpus._path('active.json').exists():
+            previous = self.corpus.active()
+        previous_sources = {source.key: source for source in previous.sources} if previous else {}
+        previous_fingerprints = dict(previous.fingerprints) if previous else {}
+        previous_retired = set(previous.retired_ids) if previous else set()
         confirmed = set(self.approval_resolver() if self.approval_resolver else ())
         approved = set(approved_ids)
         retired = set()
@@ -200,6 +206,12 @@ class CorpusImporter:
                 if source and digest == source.digest:
                     continue
                 if source and digest == _KNOWN_SOURCE_DIGESTS.get(key):
+                    retired.add(row.id)
+                elif row.id in previous_retired:
+                    retired.add(row.id)
+                elif (source and (old := previous_sources.get(key)) and old.digest == digest
+                      and row.id in old.chunk_ids
+                      and previous_fingerprints.get(row.id) == content_fingerprint(row.draft)):
                     retired.add(row.id)
                 elif row.id not in approved:
                     raise corpus_error('存在未知来源版本，请先核查。')

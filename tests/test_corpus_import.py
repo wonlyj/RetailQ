@@ -11,6 +11,29 @@ from tests.support.knowledge import TestBudget
 from tests.support.reviews import review_harness
 
 
+def test_prior_snapshot_only_retires_matching_source_chunk_fingerprint(tmp_path):
+    from types import SimpleNamespace
+    from retailq.errors import ServiceError
+    from retailq.knowledge.contracts import ChunkDraft, ChunkRecord
+    from retailq.knowledge.text import content_fingerprint
+
+    old_digest='a'*64;new_digest='b'*64
+    draft=ChunkDraft('分类','问题','原始内容',f'policy.md@{old_digest} / 分类 / 块1','policy')
+    row=ChunkRecord(12,draft,None,None,'12','done')
+    source=SimpleNamespace(key='policy.md',digest=old_digest,chunk_ids=(12,))
+    previous=SimpleNamespace(sources=(source,),fingerprints=((12,content_fingerprint(draft)),),retired_ids=())
+    corpus=SimpleNamespace(_path=lambda *a: SimpleNamespace(exists=lambda: True),active=lambda:previous)
+    repository=SimpleNamespace(all_chunks=lambda:[row])
+    importer=CorpusImporter(repository,corpus,TestBudget())
+    plan=SimpleNamespace(sources=(SimpleNamespace(key='policy.md',digest=new_digest),))
+    assert importer._existing(plan,())[2]==(12,)
+    previous.fingerprints=((12,'c'*64),)
+    with pytest.raises(ServiceError):importer._existing(plan,())
+    previous.fingerprints=((12,content_fingerprint(draft)),)
+    source.chunk_ids=(13,)
+    with pytest.raises(ServiceError):importer._existing(plan,())
+
+
 @pytest.mark.mysql
 def test_committed_import_resumes_same_ids(test_database, tmp_path):
     source = tmp_path / 'sources'

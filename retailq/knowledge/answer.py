@@ -54,7 +54,15 @@ class ConfidencePolicy:
     @classmethod
     def load(cls, path, *, expected_identity):
         try:
-            data = json.loads(path.read_text(encoding='utf-8'))
+            raw = path.read_bytes()
+        except OSError:
+            raise ServiceError('rag_policy_unavailable', 503, '知识置信度配置缺失或与当前版本不一致，请先完成校准。') from None
+        return cls.from_bytes(raw, expected_identity=expected_identity)
+
+    @classmethod
+    def from_bytes(cls, raw, *, expected_identity):
+        try:
+            data = json.loads(raw.decode('utf-8'))
             keys = {'model', 'corpus_hash', 'prompt_hash', 'query_hash', 'strategy'}
             if (not isinstance(expected_identity, dict) or set(expected_identity) != keys or
                     any(not isinstance(v, str) or not v for v in expected_identity.values()) or
@@ -64,11 +72,11 @@ class ConfidencePolicy:
             if not isinstance(thresholds, dict) or not thresholds or any(type(v) not in (int, float) or not math.isfinite(v) for v in thresholds.values()):
                 raise ValueError('invalid thresholds')
             return cls(data['identity'], thresholds)
-        except (OSError, ValueError, TypeError, KeyError):
+        except (UnicodeDecodeError, ValueError, TypeError, KeyError):
             raise ServiceError('rag_policy_unavailable', 503, '知识置信度配置缺失或与当前版本不一致，请先完成校准。') from None
 
     def allows(self, result):
-        if result.strategy != self.identity['strategy'] or result.strategy not in self.thresholds or result.snapshot.corpus_hash != self.identity['corpus_hash']:
+        if self.identity['strategy'] not in ('all', result.strategy) or result.strategy not in self.thresholds or result.snapshot.corpus_hash != self.identity['corpus_hash']:
             raise ServiceError('rag_policy_unavailable', 503, '当前检索策略尚未校准。')
         return bool(result.candidates) and result.candidates[0].score >= self.thresholds[result.strategy]
 

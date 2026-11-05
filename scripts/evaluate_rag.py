@@ -17,12 +17,13 @@ ROOT=Path(__file__).resolve().parents[1]
 EVAL_ROOT=(ROOT/'artifacts/evals/ch04').resolve()
 
 
-def build_identity(settings,snapshot,split,*,files=None,server_version=None):
+def build_identity(settings,snapshot,split,*,files=None,server_version=None,policy_hash=None):
     from retailq.knowledge.evaluation.contracts import read_cases
+    from retailq.knowledge.policy import policy_identity
     if split not in ('calibration','test'): raise ValueError('invalid split')
     if files is None:
         files=sorted((ROOT/'retailq').rglob('*.py'))+sorted((ROOT/'retailq/prompts').glob('*.txt'))+[
-            ROOT/'scripts/evaluate_rag.py',ROOT/'evals/ch04_cases.jsonl',ROOT/'examples/knowledge/synonyms.json',
+            ROOT/'scripts/evaluate_rag.py',ROOT/'scripts/calibrate_rag.py',ROOT/'evals/ch04_cases.jsonl',ROOT/'examples/knowledge/synonyms.json',
             ROOT/'requirements.lock']
     digest=sha256()
     for path in files:
@@ -30,9 +31,11 @@ def build_identity(settings,snapshot,split,*,files=None,server_version=None):
         digest.update(path.name.encode('utf-8'));digest.update(b'\0');digest.update(path.read_bytes());digest.update(b'\0')
     policy=Path(settings.rag_confidence_path)
     if not policy.is_absolute(): policy=ROOT/policy
-    policy_hash=sha256(policy.read_bytes()).hexdigest() if split=='test' and policy.is_file() else None
+    if policy_hash is None:
+        policy_hash=sha256(policy.read_bytes()).hexdigest() if split=='test' and policy.is_file() else None
     return {'split':split,'expected':80 if split=='calibration' else 320,
             'case_ids':[c.eval_id for c in read_cases(ROOT/'evals/ch04_cases.jsonl') if c.split==split],
+            'policy_identity':policy_identity(settings,snapshot,'hybrid_rerank'),
             'corpus_hash':snapshot.corpus_hash,'collection':snapshot.collection,'source_hash':digest.hexdigest(),
             'policy_hash':policy_hash,'python':sys.version.split()[0],
             'milvus_server':server_version,
@@ -69,14 +72,21 @@ def report_command(store, *, refresh_sealed=False):
     _write(store.root/'report.json',report)
     lines=['# 第四章评估报告','',f"分集：{report['split']}；完成：{report['complete']}；"
            f"记录：{report['observed']}/{report['expected']}。",'',
-           '| 策略 | 已完成 | Recall@10 | MRR | Faithfulness 宏平均 | 作答 | 拒答 |',
+           '| 策略 | 已完成 | Recall@10 | MRR@10 | Faithfulness 宏平均 | 作答 | 拒答 |',
            '|---|---:|---:|---:|---:|---:|---:|']
     def fmt(v): return 'N/A' if v is None else f'{v:.4f}'
     for strategy,summary in report['overall'].items():
         lines.append(f"| {strategy} | {summary['completed']} | {fmt(summary['recall'].get('10'))} | "
                      f"{fmt(summary['mrr'])} | {fmt(summary['faithfulness_macro'])} | {summary['answered']} | {summary['refused']} |")
+    lines+=['','## 拒答与覆盖','','| 策略 | 可答题拒答 / 完成数 | 不可答题拒答 / 完成数 | 引用回答 / 作答数 | 已裁判 / 作答数 |',
+            '|---|---:|---:|---:|---:|']
+    def ratio(n,d): return f'{n} / {d}' if d else 'N/A (0 / 0)'
+    for strategy,summary in report['overall'].items():
+        lines.append(f"| {strategy} | {ratio(summary['answerable_refusals'],summary['answerable_completed'])} | "
+                     f"{ratio(summary['unanswerable_refusals'],summary['unanswerable_completed'])} | "
+                     f"{ratio(summary['cited_answers'],summary['answered'])} | {ratio(summary['judge_answered'],summary['answered'])} |")
     lines+=['','## 按问题类型','',
-            '| 类型 | 策略 | 已完成 | Recall@10 | MRR | Faithfulness 宏平均 | 作答 | 拒答 |',
+            '| 类型 | 策略 | 已完成 | Recall@10 | MRR@10 | Faithfulness 宏平均 | 作答 | 拒答 |',
             '|---|---|---:|---:|---:|---:|---:|---:|']
     for bucket,strategies in report['by_bucket'].items():
         for strategy,summary in strategies.items():
@@ -123,7 +133,7 @@ async def execute_real(output, split, *, resume=False):
     from retailq.knowledge.evaluation.runner import EvaluationRunner, _owned_thread
     from retailq.knowledge.faith_repository import FaithEvaluationCase, FaithRepository
     from retailq.knowledge.faith_store import FaithStore
-    from retailq.knowledge.policy import DynamicConfidencePolicy
+    from retailq.knowledge.policy import freeze_evaluation_policy
     from retailq.knowledge.query import QueryNormalizer
     from retailq.knowledge.rag_gateway import OpenAIRAGGateway
     from retailq.knowledge.rerank import Reranker
@@ -143,7 +153,8 @@ async def execute_real(output, split, *, resume=False):
         cases=load_cases(ROOT/'evals/ch04_cases.jsonl',snapshot,repository=runtime.service.repository)
         with runtime.vectors.open(snapshot.collection) as vector_probe:
             server_version=vector_probe.client.get_server_version()
-        identity=build_identity(settings,snapshot,split,server_version=server_version)
+        frozen_policy,policy_hash=freeze_evaluation_policy(settings,snapshot) if split=='test' else (None,None)
+        identity=build_identity(settings,snapshot,split,server_version=server_version,policy_hash=policy_hash)
         if split=='test' and identity['policy_hash'] is None:
             raise ValueError('test evaluation requires a calibrated policy')
         store=EvaluationStore.resume(output,identity) if resume else EvaluationStore.open_new(output,identity)
@@ -186,7 +197,7 @@ async def execute_real(output, split, *, resume=False):
             runner=EvaluationRunner(snapshot=snapshot,normalize=normalizer.understand,retrieve=engine.retrieve,
                 gateway=gateway,judge=judge,bundle_factory=lambda result:prepare_bundle(result,system_prompt=prompt,input_budget=settings.input_budget),
                 store=store,timeout_seconds=settings.knowledge_query_timeout_seconds,
-                policy=DynamicConfidencePolicy(settings) if split=='test' else None,ledger=ledger)
+                policy=frozen_policy,ledger=ledger)
             await runner.run(cases,split=split)
         report=report_command(store)
         if not report['rows_complete']: raise ValueError('evaluation is incomplete')

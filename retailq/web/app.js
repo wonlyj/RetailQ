@@ -1,4 +1,4 @@
-(() => {
+import { renderActions, validateActions } from './actions.js';
   "use strict";
   const $ = (id) => document.getElementById(id);
   const storageKey = "retailq.chat.v1";
@@ -83,6 +83,11 @@
         ).slice(-200).map((message) => {
           const restored = { ...message, citations: validCitations(message.citations),
             feedback: validFeedback(message, message.feedback) ? message.feedback : null };
+          try {
+            restored.actions = validateActions({ message_id: message.serverMessageId, conversation_id: session.conversationId,
+              turn_id: message.workflowTurnId, actions: message.actions || [] }).map(action =>
+                ({ ...action, verified: false, needsCheck: action.kind === 'ticket' }));
+          } catch { restored.actions = []; }
           return message.status === "pending"
             ? { ...restored, status: "stopped", detail: `上次回复未完成。${executionNote(message)}`,
                 toolTrace: (message.toolTrace || []).map((trace) => trace.status === 'running' ? {...trace, status: 'unknown'} : trace) }
@@ -208,12 +213,14 @@
     $('sourceError').hidden = true;
     $('showOriginal').disabled = false;
     $('showOriginal').onclick = async () => {
-      if (!Number.isSafeInteger(message.conversationId) || message.conversationId <= 0 || typeof message.toolCallId !== 'string') {
+      if (!Number.isSafeInteger(message.conversationId) || message.conversationId <= 0 ||
+          (typeof message.toolCallId !== 'string' && !/^[0-9a-f]{32}$/.test(message.workflowTurnId || ''))) {
         $('sourceError').textContent = '无法定位这条引用的原始会话。'; $('sourceError').hidden = false; return;
       }
       $('showOriginal').disabled = true;
       try {
-        const url = `/api/conversations/${message.conversationId}/tool-calls/${encodeURIComponent(message.toolCallId)}/sources/${citation.number}/document?user_id=${encodeURIComponent(userId)}`;
+        const reference = message.workflowTurnId ? `workflow-turns/${message.workflowTurnId}` : `tool-calls/${encodeURIComponent(message.toolCallId)}`;
+        const url = `/api/conversations/${message.conversationId}/${reference}/sources/${citation.number}/document?user_id=${encodeURIComponent(userId)}`;
         const response = await fetch(url);
         if (!response.ok) throw new Error('来源原文暂时不可用，请稍后重试。');
         const documentView = await response.json();
@@ -242,7 +249,7 @@
     };
     if (!$('sourceDialog').open) $('sourceDialog').showModal();
   }
-  function renderMessage(message) {
+  function renderMessage(message, session = current()) {
     const article = document.createElement("article");
     article.className = `message ${message.role}`;
     article.dataset.messageId = message.id;
@@ -253,7 +260,7 @@
     content.className = "message-content";
     const heading = document.createElement("div");
     heading.className = "message-heading";
-    heading.append(document.createTextNode(message.role === "user" ? "你" : "RetailQ 助手"));
+    heading.append(document.createTextNode(message.role === "user" ? "你" : message.simulated ? "客服小猫（模拟）" : "RetailQ 助手"));
     const date = new Date(message.createdAt || Date.now());
     if (!Number.isNaN(date.getTime())) {
       const time = document.createElement("time");
@@ -267,11 +274,12 @@
     tools.className = "message-tools";
     const trace = document.createElement('div');
     trace.className = 'tool-trace';
-    content.append(heading, trace, body, tools);
+    const actions = document.createElement('div'); actions.className = 'workflow-actions';
+    content.append(heading, trace, body, actions, tools);
     article.append(avatar, content);
     $("messages").append(article);
-    updateMessage(message, { article, body, tools, trace });
-    return { article, body, tools, trace };
+    updateMessage(message, { article, body, tools, trace, actions, session });
+    return { article, body, tools, trace, actions, session };
   }
   function updateMessage(message, elements) {
     const { article, body, tools, trace } = elements;
@@ -297,6 +305,29 @@
       body.replaceChildren(typing);
     } else body.textContent = message.role === "assistant" ? "本次未收到完整回复。" : "";
     tools.replaceChildren();
+    if (elements.actions) renderActions(elements.actions, message, {
+      userId, isBusy: () => busy,
+      request: async (path, options = {}) => {
+        const timeout = new AbortController(); const timer = setTimeout(() => timeout.abort(), 10000);
+        try {
+          const response = await fetch(path, { method: options.method || 'GET',
+            ...(options.body ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options.body) } : {}),
+            signal: timeout.signal });
+          const result = await response.json();
+          if (!response.ok) throw Object.assign(new Error(result?.error?.message || '工单操作尚未确认。'),
+            { status: response.status, code: result?.error?.code });
+          return result;
+        } finally { clearTimeout(timer); }
+      },
+      notify,
+      changed: () => { persist(); if (current()?.id === elements.session?.id && !busy) render(); },
+      simulateHandoff: lines => {
+        const target = elements.session;
+        if (!target) return;
+        for (const text of lines) target.messages.push({ id: uid(), turnId: uid(), role: 'assistant', text,
+          status: 'complete', simulated: true, createdAt: new Date().toISOString(), toolTrace: [] });
+      },
+    });
     if (message.role !== "assistant" || message.status === "pending") return;
     if (message.status === 'complete' && message.text) {
       const feedback = document.createElement('div');
@@ -346,7 +377,7 @@
     $("welcome").hidden = Boolean(session.messages.length);
     $("messages").hidden = !session.messages.length;
     $("messages").replaceChildren();
-    session.messages.forEach(renderMessage);
+    session.messages.forEach(message => renderMessage(message, session));
     if (session.messages.length) scrollToBottom(true);
     else $("chatScroll").scrollTop = 0;
     syncControls();
@@ -415,7 +446,8 @@
     persist();
     render();
     const article = $("messages").lastElementChild;
-    const elements = { article, body: article.querySelector(".message-body"), tools: article.querySelector(".message-tools"), trace: article.querySelector('.tool-trace') };
+    const elements = { article, body: article.querySelector(".message-body"), tools: article.querySelector(".message-tools"),
+      trace: article.querySelector('.tool-trace'), actions: article.querySelector('.workflow-actions'), session };
     let reader;
     let terminal = null;
     let inputRejected = false;
@@ -457,7 +489,15 @@
           } else if (event === 'meta') {
             if (!Number.isSafeInteger(payload.conversation_id) || payload.conversation_id <= 0) throw new Error('会话标识异常，请新建对话。');
             session.conversationId = payload.conversation_id;
+            assistant.workflowTurnId = payload.turn_id;
             persist();
+          } else if (event === 'workflow') {
+            if (typeof payload.node !== 'string' || !['enter', 'exit'].includes(payload.phase)) throw new Error('工作流状态格式异常。');
+          } else if (event === 'actions') {
+            if (payload.conversation_id !== session.conversationId || payload.turn_id !== assistant.workflowTurnId) throw new Error('操作来源会话不匹配。');
+            assistant.actions = validateActions(payload).map(action => ({ ...action, verified: true }));
+            assistant.serverMessageId = payload.message_id;
+            assistant.conversationId = session.conversationId;
           } else if (event === 'tool_status') {
             if (typeof payload.name !== 'string' || typeof payload.tool_call_id !== 'string' || !['running','completed','failed'].includes(payload.status)) throw new Error('工具状态格式异常。');
             const prior = assistant.toolTrace.findIndex((t) => t.tool_call_id === payload.tool_call_id);
@@ -471,11 +511,12 @@
             const citations = validCitations(payload.citations);
             if (!Array.isArray(payload.citations) || citations.length !== payload.citations.length ||
                 typeof payload.message_id !== 'string' || !/^[1-9]\d*$/.test(payload.message_id) ||
-                typeof payload.tool_call_id !== 'string' || !session.conversationId) {
+                (typeof payload.tool_call_id !== 'string' && !/^[0-9a-f]{32}$/.test(payload.turn_id || '')) || !session.conversationId) {
               throw new Error('引用来源格式异常，请重试。');
             }
             assistant.citations = citations;
             assistant.toolCallId = payload.tool_call_id;
+            if (payload.turn_id) assistant.workflowTurnId = payload.turn_id;
             assistant.conversationId = session.conversationId;
             assistant.serverMessageId = payload.message_id;
             persist();
@@ -517,7 +558,7 @@
       updateMessage(assistant, elements);
       persist();
       syncControls();
-      renderSessions();
+      render();
       scrollToBottom();
       $("messageInput").focus({ preventScroll: true });
     }
@@ -564,4 +605,3 @@
   $('sourceDialog').addEventListener('close', () => { sourceView++; });
   window.matchMedia("(max-width: 760px)").addEventListener("change", syncNavAccess);
   restore(); render(); syncNavAccess(); void checkService();
-})();

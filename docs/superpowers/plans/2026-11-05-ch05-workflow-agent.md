@@ -188,7 +188,7 @@ async def test_confirm_twice_reuses_ticket(action_service, ticket_args):
 
 **Interfaces:** actions.js导出 `renderActions(container,message,context)` 与 `validateActions(payload)`；context固定包含userId/cid/originMessageId及目标session引用。现有app.js维护SSE/消息，交由动作模块渲染； sources支持旧toolCallId或新workflowTurnId，两种来源路径不混用。
 
-- [ ] 写必要的行为红测试：actions只允许完成且有效来源，正文提到“建工单”不能生成按钮；确认取消零请求；handoff确认零HTTP票据请求，精确显示两句指定文案；ticket确认仅1 POST，两按钮任意顺序互不触发；半截SSE/无done不启用动作。测试按行为，不逐条镜像CSS/DOM实现。
+- [x] 写必要的行为红测试：actions只允许完成且有效来源，正文提到“建工单”不能生成按钮；确认取消零请求；handoff确认零HTTP票据请求，精确显示两句指定文案；ticket确认仅1 POST，两按钮任意顺序互不触发；半截SSE/无done不启用动作。测试按行为，不逐条镜像CSS/DOM实现。
 
 ```javascript
 // workflow_frontend_races.mjs：实际点击并确认后断言
@@ -196,10 +196,10 @@ assert.equal(ticketPostCount, 0); // 仅确认“转人工”后
 assert.match(chatText, /已转接人工客服/);
 assert.match(chatText, /您好,我是客服小猫,请问有什么可以帮您的/);
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_frontend.py -q` 确认红（浏览器运行器复用仓库既有方式，不新增前端框架）；实现两独立确认交互、工单description/type输入及提交状态、handoff模拟消息。用户不点则输入照常可用；模拟问候不上传为真实人工/模型历史。
-- [ ] ticket未知结果禁重POST，允许GET核查；刷新从服务器动作状态恢复，手改浏览器状态不能冒充已创建。旧气泡动作仍绑旧消息；会话切换时回执只更新原session，按钮disabled仅约束自身提交/会话忙，不把handoff与ticket绑定。服务端动作文本当数据用DOM textContent渲染。
-- [ ] 运行本任务测试，再实际浏览器验证投诉双按钮、不选继续、两种顺序、取消、重复点/刷新/超时、换会话、Agent只建议一个、历史引用、停止流；保存截图和请求/票据证据。缺真实浏览器环境时明确未验项，不以单测冒充点击验收。
-- [ ] 立即留痕并提交 `feat: add separate handoff and ticket chat actions`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_frontend.py -q` 确认红（浏览器运行器复用仓库既有方式，不新增前端框架）；实现两独立确认交互、工单description/type输入及提交状态、handoff模拟消息。用户不点则输入照常可用；模拟问候不上传为真实人工/模型历史。
+- [x] ticket未知结果禁重POST，允许GET核查；刷新从服务器动作状态恢复，手改浏览器状态不能冒充已创建。旧气泡动作仍绑旧消息；会话切换时回执只更新原session，按钮disabled仅约束自身提交/会话忙，不把handoff与ticket绑定。服务端动作文本当数据用DOM textContent渲染。
+- [ ] 按用户后续明确安排，实际浏览器点击由用户在T8桌面指南交付后执行并反馈；自动行为测试已通过。原验收范围：运行本任务测试，再实际浏览器验证投诉双按钮、不选继续、两种顺序、取消、重复点/刷新/超时、换会话、Agent只建议一个、历史引用、停止流；保存截图和请求/票据证据。缺真实浏览器环境时明确未验项，不以单测冒充点击验收。
+- [x] 立即留痕并提交 `feat: add separate handoff and ticket chat actions`。
 
 ### T8：冻结评估、完整验证、审查与交付
 

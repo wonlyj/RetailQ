@@ -7,7 +7,7 @@
   <title>RetailQ · 智能客服</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%230f766e'/%3E%3Cpath d='M12 15h16l-1 15H13l-1-15zm4 0v-3a4 4 0 0 1 8 0v3' fill='none' stroke='white' stroke-width='2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="/assets/styles.css">
-  <script src="/assets/app.js" defer></script>
+  <script type="module" src="/assets/app.js"></script>
 </head>
 <body>
   <svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
@@ -85,7 +85,7 @@
   <dialog class="help-dialog" id="helpDialog" aria-labelledby="helpTitle">
     <div class="dialog-heading"><span class="dialog-icon"><svg><use href="#i-shield"/></svg></span><button class="icon-button" id="closeHelp" aria-label="关闭服务说明"><svg><use href="#i-close"/></svg></button></div>
     <h2 id="helpTitle">很高兴为你提供帮助</h2><p>你可以咨询商品选择、订单、物流，以及退款、换货、维修和投诉相关问题。</p>
-    <div class="help-points"><p><strong>关于具体订单</strong><span>支持查询订单、物流和商品；当前返回随机演示数据，不代表真实业务情况。</span></p><p><strong>关于售后处理</strong><span>支持查询演示FAQ、创建待处理人工工单；不能代为退款、修改订单或即时接通人工。</span></p><p><strong>关于个人信息</strong><span>请勿发送密码或验证码。需要核实订单时，先提供订单号即可。</span></p></div>
+    <div class="help-points"><p><strong>关于具体订单</strong><span>支持查询订单、物流和商品；当前返回随机演示数据，不代表真实业务情况。</span></p><p><strong>关于售后处理</strong><span>政策咨询先查知识库；转人工和建工单分别由您选择，转人工为本章前端模拟，工单仅在确认后创建，不执行退款。</span></p><p><strong>关于个人信息</strong><span>请勿发送密码或验证码。需要核实订单时，先提供订单号即可。</span></p></div>
     <button class="dialog-done" id="helpDone">知道了，开始咨询</button>
   </dialog>
   <dialog class="source-dialog" id="sourceDialog" aria-labelledby="sourceTitle">

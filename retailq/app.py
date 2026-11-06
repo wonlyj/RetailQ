@@ -147,6 +147,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health():
         return {"status":"ok","model_configured":settings.is_ready,"database_configured":settings.is_database_configured}
 
+    @application.get('/api/workflow/identity')
+    async def workflow_identity(request: Request):
+        require_console_local(request)
+        service=request.app.state.chat_service
+        if service is None:raise ServiceError('workflow_unavailable',503,'工作流服务尚未就绪。')
+        return {'database_identity':service.runtime.identity}
+
     @application.post("/api/after-sales/extract", response_model=AfterSalesResult)
     async def extract_after_sales(
         body: ExtractRequest, request: Request,

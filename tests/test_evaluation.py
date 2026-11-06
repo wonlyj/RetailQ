@@ -35,7 +35,7 @@ async def test_smoke_carries_actual_history(test_database):
         report = await run_smoke(api)
         assert report["status"] == "pass"
         assert report["round1"]["token_events"] == 2
-        assert upstream.requests[4][0]["messages"][-2] == {"role": "assistant", "content": "订单00123"}
+        assert [m for m in upstream.requests[4][0]['messages'] if m['role']=='assistant'][-1] == {'role':'assistant','content':'订单00123'}
         assert len(upstream.requests) == 7  # two classifier/decision/answer rounds + extraction
 
 

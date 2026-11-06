@@ -9,6 +9,38 @@ from tests.test_chat_api import parse_sse
 pytestmark=pytest.mark.mysql
 
 
+def test_sql_orphan_without_checkpoint_is_reconciled_on_next_turn(test_database,tmp_path):
+    from retailq.schemas import ChatRequest
+    peer=WorkflowUpstream('zero');peer.intent='闲聊'
+    with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'orphan.sqlite')))) as client:
+        repo=client.app.state.workflow_repository
+        orphan=repo.start_turn(ChatRequest(user_id='alice',message='在首次checkpoint前进程退出'))
+        response=client.post('/api/chat/stream',json={'user_id':'alice','conversation_id':orphan.conversation_id,'message':'你好'})
+        assert parse_sse(response.text)[-1][0]=='done'
+        assert repo.get_turn(orphan.turn_id,'alice')['status']=='interrupted'
+
+
+def test_prepare_failure_and_unconsumed_turn_receive_sql_terminal_state(test_database,tmp_path,monkeypatch):
+    from retailq.schemas import ChatRequest
+    from retailq.errors import ServiceError
+    from retailq.workflow.models import WorkflowTurn
+    from sqlalchemy import select
+    peer=WorkflowUpstream('zero')
+    with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'prep.sqlite')))) as client:
+        service=client.app.state.chat_service
+        original=service.runtime.graph_for
+        def fail(turn):raise ServiceError('checkpoint_read_failed',503,'fixture')
+        monkeypatch.setattr(service.runtime,'graph_for',fail)
+        assert client.post('/api/chat/stream',json={'user_id':'alice','message':'首次准备失败'}).status_code==503
+        with test_database.sessions() as session:
+            row=session.scalar(select(WorkflowTurn).where(WorkflowTurn.status=='failed'))
+            assert row is not None and row.payload['error_code']=='checkpoint_read_failed'
+        monkeypatch.setattr(service.runtime,'graph_for',original)
+        prepared=client.portal.call(service.prepare,ChatRequest(user_id='alice',message='未开始消费流'))
+        client.portal.call(service.release,prepared)
+        assert service.workflow_repository.get_turn(prepared.ref.turn_id,'alice')['status']=='interrupted'
+
+
 def test_file_reopen_continues_same_conversation_without_duplicate_history(test_database,tmp_path):
     peer=WorkflowUpstream('zero');peer.intent='闲聊'
     path=tmp_path/'persist.sqlite'

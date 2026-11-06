@@ -51,9 +51,9 @@ def test_chat_sse_contract_and_client_history():
         assert events[-1][1] == {"finish_reason": "stop"}
         history = [{"role": "user", "content": "订单00123"}, {"role": "assistant", "content": "您好"}]
         client.post("/api/chat/stream", json={"message": "刚才订单号？", "history": history})
-        assert [m["content"] for m in upstream.requests[4][0]["messages"]][1:] == ["订单00123", "您好", "刚才订单号？"]
+        assert [m['content'] for m in upstream.requests[4][0]['messages'] if m['role']!='system'] == ['订单00123','您好','刚才订单号？']
         client.post("/api/chat/stream", json={"message": "新会话"})
-        assert len(upstream.requests[7][0]["messages"]) == 2
+        assert [m['role'] for m in upstream.requests[7][0]['messages']] == ['system','user','system']
 
 
 def test_pre_stream_errors_do_not_call_model():

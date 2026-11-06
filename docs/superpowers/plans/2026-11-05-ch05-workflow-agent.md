@@ -207,17 +207,17 @@ assert.match(chatText, /您好,我是客服小猫,请问有什么可以帮您的
 
 **Interfaces:** CLI `python -m scripts.evaluate_workflow run --base-url URL --output DIR` 与 `review --report PATH`；`smoke_workflow --base-url URL --output PATH`；evaluate报告记录expected/completed/case IDs、样例/Prompt/代码/依赖/模型/语料/策略身份、实际节点/工具/动作/usage/票据SQL核查和人工判定。退出0仅全部完成且已评通过，1失败，2环境不足/待人工评。
 
-- [ ] 给评估器写红测试：缺例/重复/中断/未评/无真实DB证据不能通过；单纯出现工具名不等于实际执行；绑定实际加载策略SHA而非只记启动参数；run目录已存在拒绝覆盖。实现并绿测 `tests/test_workflow_eval.py`。
+- [x] 给评估器写红测试：缺例/重复/中断/未评/无真实DB证据不能通过；单纯出现工具名不等于实际执行；绑定实际加载策略SHA而非只记启动参数；run目录已存在拒绝覆盖。实现并绿测 `tests/test_workflow_eval.py`；评审后v2增加SQL内容/摘要/帧来源/唯一轮次/冻结标签复算。
 
 ```python
 def test_review_cannot_pass_unreviewed_case(report_path):
     assert main(['review', '--report', str(report_path)]) == 2
 ```
-- [ ] 冻结T2样例、Prompt和验收规则后真实运行：21条分类需21/21命中标注；12条端到端逐例符合标注；五项用户验收全部通过；必检索/弱证据不进Agent/业务不预检索/不自动建票据/确认单票据等代码约束100%。缺失事实不得编造，退款日期不承诺；人工逐事实核对引用与真实工具回执。失败则保留报告，修Prompt后新目录重跑，不事后改标签制造通过；小样本不代表生产泛化。
-- [ ] 在已有隔离MySQL/Milvus及匹配的第4章语料/策略上验证，不在演示库自动迁移/建票据。核对Docker后备CLI权限与服务；缺环境则记录并完成不依赖环境的工作。真实评估串行进行，评估结束再完整回归，避免一边改代码一边把测试结果当最终证据。
-- [ ] 执行 `& $ProjectPython -m pytest -q`、`& $ProjectPython -m pip check`；按marker/环境记录跳过原因，仓库已有故障项按其显式隔离库规则补跑。独立锁定环境安装后跑与变更相关测试；第4章真实报告仅作历史证据，不替代本章回归。测试失败用 systematic-debugging，保留首轮失败与修复记录。
-- [ ] 使用 requesting-code-review 技能派独立审查者核对固定起点2077c90至最终变更，按 spec/仓库规范检查；阻塞问题修复并复验，再记录 code review 结论。Native依然由主代理实现，不因评审而改变执行方式。
-- [ ] 文档给完整PowerShell命令：依赖安装、隔离服务启动、显式05迁移、匹配语料/策略路径、裸循环演示、uvicorn启动、五个验收问题及确认按钮步骤。默认沿用本机 `--workers 2`，SQLite/锁跨worker实测通过才如此推荐，否则不得宣称支持；出现选型矛盾按原要求停问，不暗中退回内存或更换saver。
+- [x] 冻结T2样例、Prompt和验收规则后真实运行：最终v2 G轮21/21分类、12/12流程符合标注；五项的后端/协议/受控DOM覆盖通过，真实浏览器点击按用户明确安排在T7待其反馈。必检索/弱证据不进Agent/业务不预检索/不自动建票据/确认单票据等代码约束有测试；W06实际未触发弱闸，弱分支仅受控证据覆盖。缺失事实不得编造，退款日期不承诺；已逐事实核对引用与真实工具回执。失败报告保留，不改标签、不拟合阈值，小样本不代表生产泛化。
+- [x] 在已有隔离MySQL/Milvus及匹配的第4章语料/策略上验证，不在演示库自动迁移/建票据。Docker后备CLI与服务已实测，真实评估串行进行并在结束后完整回归；v2先核对服务端数据库身份，错库不发聊天请求。
+- [x] 最终完整pytest **757 passed、0 skipped**（CH04_FAULT_DB=1，含显式3309故障项），pip check通过；独立锁环境相关100 passed。首轮723 passed/2旧契约失败及所有红绿证据保留，不用第4章历史报告替代本章结果。
+- [x] 独立只读审查固定起点2077c90至T8变更；初评1 Critical+7 Important+1 Minor。作者一次TDD修复R1–R8，完整757绿测关闭，日志细化Minor暂缓，无二审；详见代码审查记录，Native实现方式不变。
+- [x] 文档给完整PowerShell命令：依赖安装、隔离服务启动、显式05迁移、匹配语料/策略路径、裸循环演示、uvicorn启动、五个验收问题及确认按钮步骤。已在双worker上真实采集，恢复/跨进程锁另有测试；产品保持AsyncSqliteSaver。桌面指南已复制并核对SHA，GUI实际点击待用户。
 - [ ] 实际运行所有交付命令，记录启动/工具/节点/票据与恢复证据；更新README旧“每轮一个工具”“工单=已转人工”等过时说明，并保留随机演示/本地身份/SQLite限制。最后按 verification-before-completion、finishing-a-development-branch 执行已授权本地main收尾；finish即时追记四项，本地提交，推送等待用户指示。
 
 ## 自审与执行交接

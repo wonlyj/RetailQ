@@ -16,7 +16,8 @@ from retailq.errors import ServiceError
 from retailq.gateway import public_error
 from retailq.services.chat import ChatEvent
 from retailq.tools.runtime import ToolContext,build_registry
-from retailq.workflow.agent import READ_TOOLS
+from retailq.workflow.agent import READ_TOOLS,stage_reserve
+from retailq.workflow.sql import write_sql
 
 logger=logging.getLogger('retailq.workflow')
 
@@ -50,24 +51,30 @@ class WorkflowChatService:
         self.prompt=(Path(__file__).resolve().parents[1]/'prompts/workflow_agent.txt').read_text(encoding='utf-8')
 
     async def _write(self,fn,*args,**kwargs):
-        with anyio.CancelScope(shield=True):
-            return await anyio.to_thread.run_sync(partial(fn,*args,**kwargs))
+        return await write_sql(fn,*args,**kwargs)
 
     async def prepare(self,body):
-        cid=body.conversation_id;lease=None;turn=None
+        cid=body.conversation_id;lease=None;turn=None;ref=None
         try:
             if cid is not None:
                 if cid in self.busy: raise ServiceError('conversation_busy',409,'该会话仍在处理上一轮，请稍后再试。')
                 lease=self.coordinator.try_acquire('conversation',str(cid))
                 if lease is None:raise ServiceError('conversation_busy',409,'该会话仍在处理上一轮，请稍后再试。')
+                await self._write(self.workflow_repository.interrupt_active,cid,body.user_id)
                 turns=await asyncio.to_thread(self.workflow_repository.load_projection,cid,body.user_id)
             else:
                 turns=[[HumanMessage(content=body.history[i].content),AIMessage(content=body.history[i+1].content)]
                        for i in range(0,len(body.history),2)]
             registry=build_registry(self.repository,ToolContext(cid or 0,body.user_id,raw_question=body.message),self.settings)
             schemas=[convert_to_openai_tool(t) for t in registry.tools if t.name in READ_TOOLS]
-            prepared=prepare_tool_chat(body.message,turns,schemas,self.settings,system_prompt=self.prompt)
-            ref=await self._write(self.workflow_repository.start_turn,body)
+            schema_extra=len(json.dumps(schemas,ensure_ascii=False).encode('utf-8'))-len(json.dumps(schemas,ensure_ascii=False,separators=(',',':')).encode('utf-8'))
+            prepared=prepare_tool_chat(body.message,turns,schemas,self.settings,system_prompt=self.prompt,
+                reserved_tokens=stage_reserve()+schema_extra)
+            def start_turn():
+                nonlocal ref
+                ref=self.workflow_repository.start_turn(body)
+                return ref
+            await self._write(start_turn)
             cid=ref.conversation_id
             if lease is None:
                 lease=self.coordinator.try_acquire('conversation',str(cid))
@@ -79,9 +86,15 @@ class WorkflowChatService:
             turn.graph=self.runtime.graph_for(turn)
             turn.state=await self.runtime.rebase(turn,turns)
             return turn
-        except BaseException:
-            if lease is not None:lease.close()
-            if cid is not None:self.busy.discard(cid)
+        except BaseException as exc:
+            try:
+                if ref is not None:
+                    await self._write(self.workflow_repository.mark_terminal,ref,
+                        'interrupted' if isinstance(exc,asyncio.CancelledError) else 'failed',
+                        getattr(exc,'code','workflow_prepare_failed'))
+            finally:
+                if lease is not None:lease.close()
+                if cid is not None:self.busy.discard(cid)
             raise
 
     async def stream(self,turn):
@@ -151,6 +164,7 @@ class WorkflowChatService:
             try:
                 await turn.registry.drain()
                 if turn.evidence is not None:await turn.evidence.drain()
+                await self._write(self.workflow_repository.mark_terminal,turn.ref,'interrupted','request_ended')
             finally:
                 self.busy.discard(turn.conversation_id);turn.lease.close()
         if turn.registry.pending or (turn.evidence and turn.evidence.pending):

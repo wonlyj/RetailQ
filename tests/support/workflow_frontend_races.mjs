@@ -23,7 +23,16 @@ const mid='42',cid=100;
 const actions=[{kind:'handoff',action_id:'a'.repeat(32),status:'offered',origin_assistant_message_id:mid},
  {kind:'ticket',action_id:'b'.repeat(32),status:'offered',origin_assistant_message_id:mid}];
 const envelope={message_id:mid,conversation_id:cid,turn_id:'c'.repeat(32),actions};
-if(scenario==='validate'){
+if(scenario==='stream-contract'){
+ const {WorkflowFrames,restoredActions}=module.namespace;
+ const frames=()=>{const f=new WorkflowFrames();f.accept('meta',{conversation_id:cid,turn_id:envelope.turn_id});return f;};
+ assert.throws(()=>frames().finish('stop'));
+ const f=frames();f.accept('actions',envelope);f.finish('stop');
+ assert.throws(()=>f.accept('actions',envelope));
+ assert.throws(()=>frames().accept('sources',{message_id:mid,turn_id:'d'.repeat(32)}));
+ const g=frames();g.accept('sources',{message_id:'99',turn_id:envelope.turn_id});assert.throws(()=>g.accept('actions',envelope));
+ assert.throws(()=>restoredActions({serverMessageId:mid,conversationId:999,workflowTurnId:envelope.turn_id,actions},cid));
+}else if(scenario==='validate'){
  assert.equal(validateActions(envelope).length,2);
  assert.throws(()=>validateActions({...envelope,actions:[{...actions[0],origin_assistant_message_id:'99'}]}));
  assert.throws(()=>validateActions({...envelope,actions:[actions[0],actions[0]]}));

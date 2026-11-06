@@ -13,6 +13,7 @@ from retailq.workflow.classification import IntentClassifier
 from retailq.workflow.contracts import TurnRef
 from retailq.workflow.evidence import EvidenceSteps
 from retailq.workflow.graph import build_graph,emit
+from retailq.workflow.sql import write_sql
 
 
 class WorkflowRuntime:
@@ -67,7 +68,7 @@ class WorkflowRuntime:
         return {'configurable':{'thread_id':self.identity+':'+str(cid)},'recursion_limit':128}
 
     def graph_for(self,turn):
-        turn.evidence=EvidenceSteps(self.chat_repository.rag_retrieve,self.policy,self.settings)
+        turn.evidence=EvidenceSteps(self.chat_repository.rag_retrieve,self.policy,self.settings,deadline=turn.deadline)
         agent=AgentSteps(self.gateway,turn.registry,self.settings,emit,repository=self.repository,
                          turn=turn.ref,deadline=turn.deadline)
         turn.agent=agent
@@ -82,7 +83,7 @@ class WorkflowRuntime:
             previous=old.values
             if previous.get('turn_id') and previous['turn_id']!=turn.ref.turn_id:
                 ref=TurnRef(previous['turn_id'],previous['conversation_id'],previous['user_message_id'])
-                await asyncio.to_thread(self.repository.mark_terminal,ref,'interrupted','previous_run_incomplete')
+                await write_sql(self.repository.mark_terminal,ref,'interrupted','previous_run_incomplete')
             await graph.aupdate_state(config,{'status':'interrupted','actions':[]},as_node='log')
             if (await graph.aget_state(config)).next:
                 raise ServiceError('workflow_recovery_required',409,'旧轮次尚未安全结束，请核查。')

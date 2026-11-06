@@ -11,6 +11,7 @@ from retailq.services.chat import ChatEvent
 from retailq.workflow.classification import COMPLAINT_REPLY,SMALLTALK_REPLY,resolve_reference
 from retailq.workflow.contracts import WorkflowState,TurnRef
 from retailq.workflow.evidence import validate_answer_references
+from retailq.workflow.sql import write_sql
 
 logger=logging.getLogger('retailq.workflow')
 
@@ -46,9 +47,9 @@ def build_graph(agent,classifier,evidence,repository,checkpointer):
     async def log(state):
         turn=TurnRef(state['turn_id'],state['conversation_id'],state['user_message_id'])
         if state.get('status')=='interrupted':
-            await asyncio.to_thread(repository.mark_terminal,turn,'interrupted',state.get('finish_reason'))
+            await write_sql(repository.mark_terminal,turn,'interrupted',state.get('finish_reason'))
             return {}
-        final=await asyncio.to_thread(repository.finalize,turn,state)
+        final=await write_sql(repository.finalize,turn,state)
         return {'final_message_id':final.message_id}
 
     def wrapped(name,fn):

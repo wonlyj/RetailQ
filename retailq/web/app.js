@@ -1,4 +1,4 @@
-import { renderActions, validateActions } from './actions.js';
+import { renderActions, validateActions, restoredActions, WorkflowFrames } from './actions.js';
   "use strict";
   const $ = (id) => document.getElementById(id);
   const storageKey = "retailq.chat.v1";
@@ -84,8 +84,7 @@ import { renderActions, validateActions } from './actions.js';
           const restored = { ...message, citations: validCitations(message.citations),
             feedback: validFeedback(message, message.feedback) ? message.feedback : null };
           try {
-            restored.actions = validateActions({ message_id: message.serverMessageId, conversation_id: session.conversationId,
-              turn_id: message.workflowTurnId, actions: message.actions || [] }).map(action =>
+            restored.actions = restoredActions(message, session.conversationId).map(action =>
                 ({ ...action, verified: false, needsCheck: action.kind === 'ticket' }));
           } catch { restored.actions = []; }
           return message.status === "pending"
@@ -450,6 +449,7 @@ import { renderActions, validateActions } from './actions.js';
       trace: article.querySelector('.tool-trace'), actions: article.querySelector('.workflow-actions'), session };
     let reader;
     let terminal = null;
+    const workflowFrames = new WorkflowFrames();
     let inputRejected = false;
     try {
       const response = await fetch("/api/chat/stream", {
@@ -479,6 +479,7 @@ import { renderActions, validateActions } from './actions.js';
         if (line !== "") return;
         if (data.length) {
           const payload = JSON.parse(data.join("\n"));
+          workflowFrames.accept(event, payload);
           if (event === "error") throw new Error(payload.message || "回复中断，请稍后重试。");
           if (terminal !== null) throw new Error("回复连接异常，未能完整接收。");
           if (event === "token") {
@@ -516,11 +517,10 @@ import { renderActions, validateActions } from './actions.js';
             }
             assistant.citations = citations;
             assistant.toolCallId = payload.tool_call_id;
-            if (payload.turn_id) assistant.workflowTurnId = payload.turn_id;
             assistant.conversationId = session.conversationId;
             assistant.serverMessageId = payload.message_id;
             persist();
-          } else if (event === "done") terminal = payload.finish_reason;
+          } else if (event === "done") { workflowFrames.finish(payload.finish_reason); terminal = payload.finish_reason; }
           else throw new Error("回复格式异常，请重试。");
         }
         event = "";

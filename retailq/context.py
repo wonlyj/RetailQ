@@ -94,10 +94,10 @@ def history_turns(records) -> list[list[BaseMessage]]:
     return turns
 
 
-def prepare_tool_chat(message: str, turns: list[list[BaseMessage]], tool_schemas: list[dict], settings: Settings, *, system_prompt: str | None = None) -> PreparedChat:
+def prepare_tool_chat(message: str, turns: list[list[BaseMessage]], tool_schemas: list[dict], settings: Settings, *, system_prompt: str | None = None, reserved_tokens: int = 0) -> PreparedChat:
     system, user = SystemMessage(content=system_prompt if system_prompt is not None else load_system_prompt()), HumanMessage(content=message)
     schema_cost = len(json.dumps(tool_schemas,ensure_ascii=False,separators=(',',':')).encode('utf-8')) if tool_schemas else 0
-    fixed_cost = estimate_tokens([system,user]) + schema_cost
+    fixed_cost = estimate_tokens([system,user]) + schema_cost + reserved_tokens
     require_budget(fixed_cost,settings.input_budget)
     # Preserve successful tool receipts while keeping old malformed model output
     # out of subsequent requests. Stored records and user/tool content stay intact.

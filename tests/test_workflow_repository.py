@@ -53,6 +53,21 @@ def test_finalization_failure_rolls_back_assistant_and_pool(repo,test_database,m
         assert session.scalar(select(func.count()).select_from(LowConfidenceQuestion))==0
 
 
+def test_mysql_json_numeric_normalization_does_not_break_snapshot_hash(repo):
+    from dataclasses import asdict
+    from retailq.knowledge.answer import prepare_bundle
+    from tests.test_rag_answer import retrieval
+    repo=repo();turn=repo.start_turn(ChatRequest(user_id='alice',message='政策'))
+    bundle=prepare_bundle(retrieval(1),system_prompt='',input_budget=6000)
+    state={'user_id':'alice','answer':'政策见[1]','status':'completed','actions':[],
+        'gate':{'allowed':True,'top_score':0.9815511703491211},
+        'evidence':{'citations':[asdict(c) for c in bundle.citations],
+                    'scores':[0.9815511703491211,0.30000000000000004,1e-8,-0.0]}}
+    saved=repo.finalize(turn,state)
+    assert len(repo.load_citations(turn.conversation_id,'alice',saved.evidence_id))==1
+    assert repo.finalize(turn,state).message_id==saved.message_id
+
+
 def test_owned_history_excludes_current_user_and_preserves_prior_turn(repo):
     repo = repo()
     one = repo.start_turn(ChatRequest(user_id='alice',message='上一轮'))
@@ -132,3 +147,27 @@ def test_evidence_snapshot_is_immutable_and_authorized(repo,test_database):
         payload['final']['evidence']['citations'][0]['text']='tampered';row.payload=payload
     with pytest.raises(ServiceError) as error: repo.load_citations(turn.conversation_id,'alice',final.evidence_id)
     assert error.value.code=='citation_invalid'
+
+
+@pytest.mark.parametrize('settled',[False,True])
+def test_old_action_fact_survives_later_incomplete_tool_turn(repo,test_database,settled):
+    from retailq.repositories import ChatRepository
+    repo=repo();first=repo.start_turn(ChatRequest(user_id='alice',message='我要投诉'))
+    final=repo.finalize(first,{'user_id':'alice','answer':'请选择','status':'completed','actions':['ticket']})
+    broken=repo.start_turn(ChatRequest(user_id='alice',conversation_id=first.conversation_id,message='查订单1001'))
+    repo.record_tool_request(broken,AIMessage(content='',tool_calls=[{'id':'unresolved','name':'query_order','args':{'order_id':'1001'}}]))
+    action=repo.claim_action(first.conversation_id,'alice',final.actions[0]['action_id'],'旧问题的明确确认描述','投诉')
+    ticket=ChatRepository(test_database).create_ticket(first.conversation_id,'alice','旧问题的明确确认描述','投诉',action['tool_call_id'])
+    if settled:repo.reconcile_action(first.conversation_id,'alice',action['action_id'])
+    projection=repo.load_projection(first.conversation_id,'alice')
+    facts=[m.content for t in projection for m in t if ticket['ticket_no'] in m.content]
+    assert len(facts)==1
+    assert f'原回复{final.message_id}' in facts[0] and '旧问题的明确确认描述' in facts[0]
+
+
+def test_recovery_does_not_overwrite_a_definite_failure(repo):
+    repo=repo();turn=repo.start_turn(ChatRequest(user_id='alice',message='失败轮次'))
+    repo.mark_terminal(turn,'failed','specific_error')
+    repo.mark_terminal(turn,'interrupted','previous_run_incomplete')
+    row=repo.get_turn(turn.turn_id,'alice')
+    assert row['status']=='failed' and row['payload']['error_code']=='specific_error'

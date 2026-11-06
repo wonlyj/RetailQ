@@ -4,7 +4,8 @@ import json
 from uuid import uuid4
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from langchain_core.messages import AIMessage
+from sqlalchemy import select,text
 from retailq.api.source_schemas import CitationRecord
 from retailq.context import history_turns
 from retailq.errors import ServiceError
@@ -71,15 +72,24 @@ class WorkflowRepository:
             records = []
             for row in rows:
                 if row.id in by_request:
-                    action=by_request[row.id]
-                    text = ('工单工具已确认：'+json.dumps(action.result,ensure_ascii=False) if action.status=='completed'
-                            else '工单创建结果尚未确认，请核查后再操作。')
-                    records.append(MessageRecord(row.id,cid,'assistant',
-                        f'用户通过按钮确认建工单（原回复{action.origin_assistant_message_id}，动作{action.action_id}）。{text}',
-                        None,None,row.created_at))
+                    continue
                 elif row.role=='tool' and row.tool_call_id in action_call_ids: continue
                 else: records.append(MessageRecord(row.id,cid,row.role,row.content,row.tool_calls,row.tool_call_id,row.created_at))
-            return history_turns(records)
+            turns=history_turns(records)
+            # User actions are independent facts, not part of a possibly broken
+            # model tool turn. A committed tool receipt wins over lagging metadata.
+            receipts={r.tool_call_id:json.loads(r.content) for r in rows if r.role=='tool' and r.tool_call_id in action_call_ids}
+            for row in rows:
+                if row.id not in by_request:continue
+                action=by_request[row.id]
+                receipt=receipts.get(action.tool_call_id,{})
+                result=receipt.get('data') if receipt.get('ok') is True else action.result if action.status=='completed' else None
+                arguments=(row.tool_calls or [{}])[0].get('function',{}).get('arguments','{}')
+                text=('工单工具已确认：'+json.dumps(result,ensure_ascii=False) if result
+                      else '工单创建结果尚未确认，请核查后再操作。')
+                fact=AIMessage(content=f'用户通过按钮确认建工单（原回复{action.origin_assistant_message_id}，动作{action.action_id}）。确认内容：{arguments}。{text}')
+                if turns:turns[-1].append(fact)
+            return turns
 
     @database_errors
     def record_tool_request(self,turn,selection):
@@ -132,8 +142,12 @@ class WorkflowRepository:
         actions=final['actions'] or []
         if not isinstance(actions,list) or any(a not in ('handoff','ticket') for a in actions) or len(set(actions))!=len(actions):
             raise ValueError('invalid actions')
-        final_hash=digest(final)
         with self.database.sessions.begin() as session:
+            # MySQL's binary JSON can round a double by one ULP. Hash the
+            # representation actually persisted, including on duplicate calls.
+            final=json.loads(session.scalar(text('SELECT CAST(:payload AS JSON)'),
+                {'payload':json.dumps(final,ensure_ascii=False,allow_nan=False)}))
+            final_hash=digest(final)
             row=self._turn(session,turn,state['user_id'])
             if row.final_message_id is not None:
                 if row.payload.get('final_hash')!=final_hash:
@@ -162,8 +176,17 @@ class WorkflowRepository:
         if status not in ('failed','interrupted'): raise ValueError('invalid terminal state')
         with self.database.sessions.begin() as session:
             row=self._turn(session,turn,None)
-            if row.final_message_id is None:
+            if row.final_message_id is None and row.status=='active':
                 row.status=status;row.payload={**row.payload,'error_code':code}
+
+    @database_errors
+    def interrupt_active(self,cid,user_id):
+        with self.database.sessions.begin() as session:
+            ChatRepository._owned(session,cid,user_id,lock=True)
+            rows=session.scalars(select(WorkflowTurn).where(WorkflowTurn.conversation_id==cid,
+                WorkflowTurn.status=='active',WorkflowTurn.final_message_id.is_(None)).with_for_update()).all()
+            for row in rows:
+                row.status='interrupted';row.payload={**row.payload,'error_code':'previous_run_incomplete'}
 
     @database_errors
     def list_actions(self,cid,user_id,message_id):

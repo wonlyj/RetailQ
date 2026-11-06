@@ -14,7 +14,7 @@ DDL_SHA256 = 'd28c5d91f37c3e599247fc2ce879b9dced82b19e7b649083792d748ffb1fa319'
 
 
 def validate_scope(settings,scope):
-    expected = {'test':(3307,'retailq_test'),'demo':(3306,'retailq')}.get(scope)
+    expected = {'test':(3307,'retailq_test'),'demo':(3306,'retailq'),'acceptance':(3308,'retailq_test')}.get(scope)
     if (settings.mysql_host not in ('127.0.0.1','localhost','::1') or
             (settings.mysql_port,settings.mysql_database)!=expected):
         raise ServiceError('workflow_scope_invalid',409,'数据库与迁移scope不匹配，未修改。')
@@ -69,7 +69,7 @@ def migrate_workflow(database,ddl_path:Path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scope',choices=('test','demo'),required=True)
+    parser.add_argument('--scope',choices=('test','demo','acceptance'),required=True)
     args = parser.parse_args(argv)
     settings = Settings()
     validate_scope(settings,args.scope)

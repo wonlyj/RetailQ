@@ -9,6 +9,31 @@ from tests.support.workflow_upstream import WorkflowUpstream
 pytestmark = pytest.mark.anyio
 
 
+async def test_bare_demo_explains_serial_tool_steps_to_the_model(monkeypatch):
+    from argparse import Namespace
+    from scripts import demo_agent_loop
+    async def capture(state,steps):
+        assert '单步只调用一个' in state['messages'][0].content
+        return {'status':'completed','agent':{'step':0,'model_calls':0},'finish_reason':'stop'}
+    monkeypatch.setattr(demo_agent_loop,'run_bare_agent',capture)
+    assert await demo_agent_loop.run(Namespace(mode='controlled',question='先查订单再查物流'))==0
+
+
+async def test_final_answer_receives_exact_decided_button_availability():
+    peer=WorkflowUpstream('zero',bad_actions='{"actions":[]}')
+    state,_=await run_case(peer)
+    assert state['actions']==[]
+    assert '本轮实际可用按钮：[]' in peer.requests[-1]['messages'][-1]['content']
+
+
+async def test_user_visible_button_context_uses_the_frontend_chinese_labels():
+    peer=WorkflowUpstream('zero',bad_actions='{"actions":["handoff","ticket"]}')
+    state,_=await run_case(peer)
+    assert state['actions']==['handoff','ticket']
+    instruction=peer.requests[-1]['messages'][-1]['content']
+    assert '本轮实际可用按钮：["转人工","建工单"]' in instruction
+
+
 async def run_case(peer, *, deadline=None, **overrides):
     from retailq.workflow.agent import AgentSteps, run_bare_agent
     with run_server(peer.app) as url:
@@ -95,6 +120,14 @@ async def test_elapsed_deadline_never_starts_a_model_call():
     peer = WorkflowUpstream('zero')
     state, _ = await run_case(peer,deadline=0)
     assert not peer.requests and state['status'] == 'limited'
+
+
+async def test_decision_and_final_answer_are_explicitly_separate_model_phases():
+    peer=WorkflowUpstream('zero');peer.require_decision_stage=True
+    state,_=await run_case(peer)
+    assert state['status']=='completed' and len(peer.requests)==2
+    assert '[workflow_decision]' in peer.requests[0]['messages'][-1]['content']
+    assert '[workflow_decision]' not in peer.requests[1]['messages'][-1]['content']
 
 
 async def test_oversize_tool_result_stops_with_paired_receipt():

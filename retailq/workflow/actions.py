@@ -7,6 +7,7 @@ import anyio
 from retailq.errors import ServiceError
 from retailq.tools.schemas import TicketInput
 from retailq.tools.runtime import ToolContext,build_registry
+from retailq.workflow.sql import write_sql
 
 logger=logging.getLogger('retailq.workflow')
 
@@ -17,7 +18,7 @@ class TicketActionService:
         self.background=set();self.closing=False
 
     async def _sql(self,method,*args):
-        with anyio.CancelScope(shield=True):return await anyio.to_thread.run_sync(partial(method,*args))
+        return await write_sql(method,*args)
 
     def _background(self,registry,lease,cid,user_id,action_id):
         async def finish():

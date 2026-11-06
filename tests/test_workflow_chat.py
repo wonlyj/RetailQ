@@ -12,6 +12,15 @@ from tests.test_chat_api import parse_sse
 pytestmark=pytest.mark.mysql
 
 
+def test_local_readonly_identity_exposes_only_database_digest(test_database,tmp_path):
+    peer=WorkflowUpstream('zero')
+    with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'identity.sqlite'))),
+        base_url='http://127.0.0.1',client=('127.0.0.1',50000)) as client:
+        response=client.get('/api/workflow/identity')
+        assert response.status_code==200
+        assert response.json()=={'database_identity':client.app.state.chat_service.runtime.identity}
+
+
 def test_business_chat_uses_graph_tools_then_real_stream(test_database,tmp_path):
     peer=WorkflowUpstream('two')
     with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'state.sqlite')))) as client:
@@ -50,7 +59,7 @@ def test_knowledge_route_always_retrieves_before_gate_and_agent(test_database,tm
         def allows(self,result): return False
     with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'state.sqlite')))) as client:
         runtime=client.app.state.chat_service.runtime
-        runtime.chat_repository.rag_retrieve=lambda question: retrieval(0)
+        runtime.chat_repository.rag_retrieve=lambda question,**kwargs: retrieval(0)
         runtime.policy=Policy()
         events=parse_sse(client.post('/api/chat/stream',json={'user_id':'alice','message':'知识库没有的政策'}).text)
         nodes=[data['node'] for kind,data in events if kind=='workflow' and data['phase']=='enter']
@@ -70,7 +79,7 @@ def test_refund_evidence_precedes_agent_order_tool_and_references_control_commit
         def allows(self,result):return True
     with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'state.sqlite')))) as client:
         runtime=client.app.state.chat_service.runtime
-        runtime.chat_repository.rag_retrieve=lambda q:retrieval(1);runtime.policy=Policy()
+        runtime.chat_repository.rag_retrieve=lambda q,**kwargs:retrieval(1);runtime.policy=Policy()
         events=parse_sse(client.post('/api/chat/stream',json={'user_id':'alice','message':'订单1001退货，先政策再查订单'}).text)
         nodes=[d['node'] for k,d in events if k=='workflow' and d['phase']=='enter']
         assert nodes.index('retrieve')<nodes.index('gate')<nodes.index('agent_decide')<nodes.index('tools')

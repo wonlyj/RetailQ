@@ -171,7 +171,7 @@ class KnowledgeRuntime:
             with self._operation():return self.service.search_faq(keyword)
         finally:self._read_slots.release()
 
-    def retrieve(self, question, *, strategy='hybrid_rerank', category=None, category_prefix=None, content_type=None):
+    def retrieve(self, question, *, strategy='hybrid_rerank', category=None, category_prefix=None, content_type=None, deadline=None):
         import json, time
         from retailq.knowledge.query import QueryNormalizer
         from retailq.knowledge.retrieval import RetrievalEngine
@@ -180,7 +180,9 @@ class KnowledgeRuntime:
         if not self._read_slots.acquire(blocking=False):raise ServiceError('knowledge_busy',503,'知识查询繁忙，请稍后重试。')
         try:
             with self._operation():
-                deadline=time.monotonic()+self.settings.knowledge_query_timeout_seconds
+                deadline=min(time.monotonic()+self.settings.knowledge_query_timeout_seconds,
+                    deadline if deadline is not None else float('inf'))
+                if time.monotonic()>=deadline:raise ServiceError('knowledge_query_timeout',504,'知识查询等待超时，请稍后重试。')
                 snapshot=self.corpus.active()
                 if self.query_gateway is None:raise ServiceError('model_not_configured',503,'请配置问题归一模型。')
                 path=Path(__file__).resolve().parents[2]/'examples/knowledge/synonyms.json'

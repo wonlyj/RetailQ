@@ -34,7 +34,7 @@ def main():
                 service.workflow_repository.record_tool_result=crash
             elif args.phase=='after-finalize':
                 from tests.test_rag_answer import retrieval
-                service.runtime.chat_repository.rag_retrieve=lambda q:retrieval(0)
+                service.runtime.chat_repository.rag_retrieve=lambda q,**kwargs:retrieval(0)
                 class Policy:
                     def allows(self,result):return False
                 service.runtime.policy=Policy()

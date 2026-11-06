@@ -1,5 +1,6 @@
 """Small API client shared by this chapter's smoke and evaluation commands."""
 import time
+import re
 
 import httpx
 
@@ -28,6 +29,14 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
     first = None
     terminal = None
     metadata = {}
+    action_envelope=None;source_envelope=None;message_id=None
+    def bind_source(payload):
+        nonlocal message_id
+        if (payload.get('turn_id')!=metadata.get('turn_id') or
+            not re.fullmatch(r'[1-9]\d*',str(payload.get('message_id',''))) or
+            (message_id is not None and message_id!=payload['message_id'])):
+            raise ApiFailure('workflow_source_mismatch')
+        message_id=payload['message_id']
     tool_status = []
     workflow, actions, sources = [], [], []
     body = {'message':message,'history':history,'user_id':user_id}
@@ -63,6 +72,9 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                             first = time.perf_counter() - start
                         text.append(value)
                     elif event == "meta":
+                        if metadata:raise ApiFailure('duplicate_meta')
+                        if payload.get('turn_id') is not None and (not re.fullmatch(r'[0-9a-f]{32}',str(payload['turn_id'])) or
+                            type(payload.get('conversation_id')) is not int or payload['conversation_id']<1):raise ApiFailure('invalid_workflow_meta')
                         metadata = payload
                     elif event == 'tool_status':
                         if (not isinstance(payload.get('name'),str) or not isinstance(payload.get('tool_call_id'),str)
@@ -70,23 +82,33 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                             raise ApiFailure('invalid_tool_status')
                         tool_status.append(payload)
                     elif event == 'workflow':
-                        if not isinstance(payload.get('node'),str) or payload.get('phase') not in ('enter','exit'):
+                        if (not isinstance(payload.get('node'),str) or payload.get('phase') not in ('enter','exit') or
+                            not metadata.get('turn_id') or payload.get('turn_id')!=metadata['turn_id']):
                             raise ApiFailure('invalid_workflow_event')
                         workflow.append(payload)
                     elif event == 'actions':
+                        bind_source(payload)
                         items=payload.get('actions')
-                        if (not isinstance(payload.get('message_id'),str) or not payload['message_id'].isdigit()
+                        if (action_envelope is not None or payload.get('conversation_id')!=metadata.get('conversation_id') or
+                                not isinstance(payload.get('message_id'),str) or not payload['message_id'].isdigit()
                                 or not isinstance(items,list) or len(items)>2 or
                                 any(not isinstance(a,dict) or a.get('kind') not in ('handoff','ticket') or
-                                    not isinstance(a.get('action_id'),str) for a in items)):
+                                    not re.fullmatch(r'[0-9a-f]{32}',str(a.get('action_id',''))) or
+                                    a.get('origin_assistant_message_id')!=payload['message_id'] or
+                                    a.get('status') not in ('offered','executing','unknown','completed','failed') for a in items) or
+                                len({a['kind'] for a in items})!=len(items)):
                             raise ApiFailure('invalid_actions_event')
-                        actions=items
+                        actions=items;action_envelope=payload
                     elif event == 'sources':
                         from retailq.api.source_schemas import PublicCitation
                         try:
+                            if metadata.get('turn_id'):
+                                if source_envelope is not None:raise ValueError()
+                                bind_source(payload)
                             if not isinstance(payload.get('citations'),list):raise ValueError()
                             sources=[PublicCitation.model_validate(c).model_dump() for c in payload['citations']]
                             if not isinstance(payload.get('message_id'),str):raise ValueError()
+                            source_envelope=payload
                         except (TypeError,ValueError):raise ApiFailure('invalid_sources_event') from None
                     elif event == "done":
                         terminal = payload.get("finish_reason")
@@ -95,10 +117,12 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                 event, data = None, []
     if not text or terminal != "stop":
         raise ApiFailure("incomplete_or_truncated_stream")
+    if metadata.get('turn_id') and action_envelope is None:raise ApiFailure('missing_actions_event')
     return {"text": "".join(text), "token_events": len(text), "first_token_seconds": first,
             "total_seconds": time.perf_counter() - start, "finish_reason": terminal, "meta": metadata,
             'conversation_id':metadata.get('conversation_id'),'tool_status':tool_status,
-            'workflow':workflow,'actions':actions,'sources':sources}
+            'workflow':workflow,'actions':actions,'sources':sources,
+            'action_envelope':action_envelope,'source_envelope':source_envelope}
 
 
 async def extract(client: httpx.AsyncClient, base_url: str, description: str) -> dict:

@@ -57,7 +57,7 @@ def test_sse_logistics_persisted_roundtrip(test_database):
         second = client.post('/api/chat/stream',json={'message':'刚才订单号','conversation_id':cid,'user_id':'alice'})
         assert parse_sse(second.text)[-1][0] == 'done'
         wire = upstream.requests[5][0]['messages']
-        assert [m['role'] for m in wire] == ['system','user','assistant','tool','assistant','user']
+        assert [m['role'] for m in wire] == ['system','user','assistant','tool','assistant','user','system']
         assert repo.load_messages(cid,'alice')[-1].role == 'assistant'
         assert client.post('/api/chat/stream',json={'message':'偷看','conversation_id':cid,'user_id':'bob'}).status_code == 404
 

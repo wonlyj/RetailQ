@@ -1,6 +1,37 @@
 const uuid = /^[0-9a-f]{32}$/;
 const statuses = new Set(['offered', 'executing', 'unknown', 'completed', 'failed']);
 
+export function restoredActions(message, conversationId) {
+  if (message.conversationId !== conversationId) throw new Error('操作所属会话不匹配。');
+  return validateActions({ message_id: message.serverMessageId, conversation_id: conversationId,
+    turn_id: message.workflowTurnId, actions: message.actions || [] });
+}
+
+export class WorkflowFrames {
+  constructor() { this.meta = null; this.actions = null; this.messageId = null; this.hasSources = false; }
+  accept(event, payload) {
+    if (event === 'meta') {
+      if (this.meta || !Number.isSafeInteger(payload.conversation_id) || payload.conversation_id < 1 || !uuid.test(payload.turn_id || '')) throw new Error('工作流会话标识异常。');
+      this.meta = { conversation_id: payload.conversation_id, turn_id: payload.turn_id };
+    } else if (['workflow', 'actions', 'sources'].includes(event)) {
+      if (!this.meta || payload.turn_id !== this.meta.turn_id) throw new Error('工作流轮次不匹配。');
+      if (event === 'workflow') return;
+      if (!/^[1-9]\d*$/.test(payload.message_id || '') || (this.messageId && this.messageId !== payload.message_id)) throw new Error('回复来源消息不匹配。');
+      this.messageId = payload.message_id;
+      if (event === 'sources') {
+        if (this.hasSources) throw new Error('引用来源重复。');
+        this.hasSources = true;
+      } else {
+        if (this.actions !== null || payload.conversation_id !== this.meta.conversation_id) throw new Error('可选操作帧重复或会话不匹配。');
+        this.actions = validateActions(payload);
+      }
+    }
+  }
+  finish(reason) {
+    if (reason === 'stop' && (!this.meta || this.actions === null)) throw new Error('回复操作信息未完整接收，请继续咨询或重新查询。');
+  }
+}
+
 export function validateActions(payload) {
   if (!payload || !/^[1-9]\d*$/.test(payload.message_id || '') ||
       !Number.isSafeInteger(payload.conversation_id) || payload.conversation_id < 1 ||

@@ -76,6 +76,7 @@ async def test_faq_retry_is_not_multiplied():
 
 
 def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
+    from contextlib import asynccontextmanager
     import retailq.app as module
     events=[]
     class DB:
@@ -98,14 +99,22 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
     class Jobs:
         def __init__(self,runtime):events.append('jobs-open')
         async def aclose(self):events.append('jobs-close')
+    @asynccontextmanager
+    async def workflow_open(settings,repository,chat_repository,gateway,knowledge,policy,coordinator):
+        events.append('workflow-open')
+        try:
+            yield SimpleNamespace(settings=settings,repository=repository,chat_repository=chat_repository,
+                gateway=gateway,coordinator=coordinator)
+        finally:events.append('workflow-close')
     monkeypatch.setattr(module,'Database',DB)
     monkeypatch.setattr(module,'OpenAIModelGateway',Gateway)
     monkeypatch.setattr(module,'KnowledgeRuntime',SimpleNamespace(open=opened))
     monkeypatch.setattr(module,'DailyKnowledgeScheduler',Scheduler)
     monkeypatch.setattr(module,'ReviewJobs',Jobs)
+    monkeypatch.setattr(module,'WorkflowRuntime',SimpleNamespace(open=workflow_open))
     settings=Settings(_env_file=None,knowledge_enabled=True,embedding_api_key='test',mysql_password='test',openai_api_key='test',openai_model='test',openai_base_url='http://model.test/v1')
     application=module.create_app(settings)
     with TestClient(application) as client:
         assert client.get('/health').json()['model_configured'] is True
         assert application.state.knowledge_runtime is not None
-    assert events==['knowledge-open','jobs-open','schedule-start','jobs-close','schedule-stop','knowledge-close','db-close','gateway-close']
+    assert events==['knowledge-open','jobs-open','workflow-open','schedule-start','workflow-close','jobs-close','schedule-stop','knowledge-close','db-close','gateway-close']

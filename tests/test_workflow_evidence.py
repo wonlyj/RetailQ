@@ -37,6 +37,20 @@ async def test_policy_failure_is_not_low_confidence():
     assert error.value.code=='rag_policy_unavailable'
 
 
+async def test_evidence_bundle_obeys_existing_ten_citation_public_contract():
+    from retailq.workflow.evidence import EvidenceSteps
+    from retailq.api.source_schemas import CitationRecord
+    class Policy:
+        def allows(self,result): return True
+    steps=EvidenceSteps(lambda q:retrieval(15),Policy(),Settings(_env_file=None,context_window_tokens=100000))
+    state={'raw_question':'政策','messages':[HumanMessage(content='政策')]}
+    result=await steps.gate({**state,**await steps.retrieve(state)})
+    citations=result['evidence']['citations']
+    assert len(citations)==10
+    assert {c['relevance_rank'] for c in citations}==set(range(1,11))
+    assert [CitationRecord.model_validate(c).number for c in citations]==list(range(1,11))
+
+
 async def test_query_reservation_prevents_starting_retriever():
     from retailq.workflow.evidence import EvidenceSteps
     def retrieve(q): pytest.fail('budget must reject before retrieval')

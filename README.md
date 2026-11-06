@@ -2,7 +2,7 @@
 
 当前提供客服聊天、Milvus Standalone 混合知识检索和[知识审核工作台](docs/ch03-knowledge-console.md)：使用 BGE-M3 向量与 Milvus 原生中文 BM25 召回、RRF 融合及 bge-reranker-v2-m3 重排，回答可查看引用来源。页面入口 `/knowledge`。第四章真实四策略评估已完成，结果和已发现的口语问法误拒问题见[评估说明](docs/ch04-evaluation.md)；人工体验反馈仍待收集。
 
-Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现有 SSE 聊天页接入 Function Calling：模型选择一个工具，执行、回灌结果，再生成真正的流式答复。保留第 1 章售后结构化提取。
+Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain + LangGraph。第五章默认由确定性Workflow分流，核心Agent按工具回执多步决策，答复真正流式输出；AsyncSqliteSaver独立持久化。保留第1章售后结构化提取。[第五章启动与按钮验收](docs/ch05-manual-acceptance.md)、[架构](docs/ch05-workflow-agent.md)、[评估](docs/ch05-evaluation.md)。
 
 ## 已实现的工具与边界
 
@@ -10,9 +10,9 @@ Python 3.12 + FastAPI + SQLAlchemy + Docker MySQL + LangChain。第 2 章在现�
 | --- | --- |
 | query_order / query_product / query_logistics | 工具内部随机生成的演示数据，不接真实电商或物流接口，不建对应表 |
 | query_faq | 知识就绪时：混合召回、重排并用 MySQL 确认知识内容；证据不足时拒答。关闭或未就绪时明确不可用，第2章 LIKE 仅为历史基线 |
-| create_ticket | 写入 tickets，关联当前会话并更新为已转人工；不表示即时接通人工或完成退款 |
+| create_ticket | 用户独立确认“建工单”后写入tickets并关联当前会话；不表示转人工或完成退款，不向主力Agent暴露 |
 
-每次用户消息最多执行一个业务工具，没有 Agent Loop。知识回答使用证据自评及来源编号；普通工具回复仍经模型生成。工具参数由 Pydantic 校验；工单写入不自动重试，写入超时表示结果尚未确认。
+物流/订单/售后直接进有界ReAct；商品咨询/退款退货强制先检索，再过生成前置信度闸。投诉固定安抚并给两个独立按钮；闲聊一次意图分类后返回固定话术。默认最多4步工具、6次Agent模型请求，并有整轮token与时间预算。模型只能建议转人工/建工单；前者浏览器确认后模拟接入，后者确认才请求工单API，未知结果仅查询不重试。query_faq保留历史工具实现，主力Agent的知识入口由图强制控制。
 
 本项目面向本机演示，监听 127.0.0.1，可使用多个 Uvicorn worker。浏览器 user_id 是本地演示身份，不是登录鉴权；不能作为公网生产系统直接部署。
 
@@ -61,20 +61,21 @@ TOOL_READ_RETRIES=1
 
 ```powershell
 docker compose -p retailq -f compose.yaml up -d --wait mysql milvus
-& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000 --workers 2
+& $ProjectPython -m scripts.migrate_workflow --scope demo
+& $ProjectPython -m uvicorn retailq.app:app --host 127.0.0.1 --port 8000 --workers 2 --log-config examples/ch05-logging.json
 ```
 
 打开 [本机聊天页](http://127.0.0.1:8000/)，依次输入：
 
 1. `订单 1001 的物流到哪了`：气泡显示 query_logistics 徽章，按演示物流结果回答。
-2. `退货政策是什么`：query_faq 命中演示退货规则。
+2. `退货政策是什么`：日志强制retrieve→gate，再由Agent引用政策作答（需已配置第四章语料与策略）。
 3. `邮费是多少`：开启知识功能、完成运费知识向量化后，应语义召回运费演示规则并保留例外条件。第2章LIKE基线曾漏召回“邮费”，历史报告仍保留该时期结果。
 
 第四章知识建库及校准配置见[混合检索指南](docs/ch04-hybrid-rag.md)。第3章[工作台指南](docs/ch03-knowledge-console.md)和[验收清单](docs/ch03-manual-acceptance.md)保留历史流程，其中 Milvus Lite 配置不适用于第四章。默认关闭定时挖掘；网页、CLI和显式启用的scheduler都只准备待审核知识，通过后才发布。
 
-还可查询商品编号 2001、订单 001001，或说明配送问题后明确要求创建投诉工单。气泡显示工具执行中/完成/失败；停止或刷新不会撤销已提交的工单。支持新建/切换对话、复制、停止和移动端侧栏。
+还可查询商品编号2001、订单001001，或输入“我要投诉”查看两个独立按钮；仅文字表达不自动写工单。气泡显示工具执行中/完成/失败；停止或刷新不会撤销已明确确认且已提交的工单。支持新建/切换对话、复制、停止和移动端侧栏。首次体验第五章优先按隔离环境[人工指南](docs/ch05-manual-acceptance.md)，不必迁移现有演示库。
 
-首次在空具名卷启动时，MySQL 按 db/init/01-schema.sql（用户 DDL 原稿）和 02-seed.sql 建四表、灌数据。再次启动保留数据，不重复执行初始化。修改初始化脚本不会自动更新旧卷；不要用 down -v 清理用户会话。
+首次在空具名卷启动时，MySQL执行db/init目录下01–05 SQL；01/02建立业务表与种子数据，其余为知识/RAG/工作流表。再次启动保留数据，不重复初始化。旧卷需显式运行对应章节迁移，第五章为migrate_workflow；不要用down -v清理用户会话。
 
 Docker 安装后旧终端若不识别命令，可新开 PowerShell，或使用本机路径：
 
@@ -93,7 +94,7 @@ curl.exe -N http://127.0.0.1:8000/api/chat/stream -H 'Content-Type: application/
 
 请求示例：`{"message":"订单1001物流","user_id":"curl-demo"}`。meta 返回数据库 conversation_id，后续带相同 user_id 和该 ID；历史从 messages 加载。旧客户端可以只在无 ID 的新会话导入完整 user/assistant history；有 ID 时不能再传非空 history。接口拒绝未知字段和客户端 system/tool 消息。
 
-SSE data 均为 JSON：meta（会话 ID、近似输入预算、裁剪条数）→ tool_status（tool_call_id、name、running/completed/failed）→ token（真实增量）→ done（实际 finish_reason）。无需工具时没有 tool_status。流内故障返回 error 并结束，最终正文提交失败不会伪报正常 done；length/中断不保存为完整助手回答，已执行的工具事实继续保留。token 帧不保证恰好等于一个 tokenizer token。
+SSE data均为JSON：meta→workflow节点事件/可选tool_status→token→可选sources/actions→done。actions绑定原助手消息，完整提交后才可操作。无需工具时没有tool_status；流内故障返回error并结束，提交失败不伪报done；length/中断不保存完整助手回答，已执行事实继续保留。token帧不保证恰好等于一个tokenizer token。
 
 GET /health 的 model_configured/database_configured 只表示配置存在，不证明上游或数据库实时可用。输入/预算错误在流前返回 422；会话归属不匹配/不存在为 404；同会话处理上一轮时为 409；未配置模型或数据库为 503。
 
@@ -109,21 +110,24 @@ docker compose -p retailq-ch02-test -f compose.test.yaml up -d --wait mysql
 & $ProjectPython -m pip check
 ```
 
-服务已运行时执行：
+第五章按[指南](docs/ch05-manual-acceptance.md)配置3308隔离环境后执行：
 
 ```powershell
-& $ProjectPython -m scripts.smoke_tools --output artifacts/live/ch02/smoke.json
-& $ProjectPython -m scripts.evaluate_tools --output artifacts/evals/ch02/run-01
-& $ProjectPython -m scripts.evaluate_tools --review artifacts/evals/ch02/run-01/report.json
+$RunDir = 'artifacts/evals/ch05/run-' + (Get-Date -Format yyyyMMdd-HHmmss)
+& $ProjectPython -m scripts.evaluate_workflow run --base-url http://127.0.0.1:18805 --output $RunDir
+& $ProjectPython -m scripts.evaluate_workflow review --report "$RunDir/report.json"
 ```
 
-smoke 自动核对三项核心工具选择、数据库结果和流完成情况。完整评估含 12 个标注样例，保存实际工具参数/结果、最终文本及工单落库证据；逐例填写 review.status（pass/fail）与具体 reason 后才能汇总通过。退出码 0 为通过、1 为失败、2 为缺环境/待评。缺例、重复、中断或未评不能报全部通过。修 Prompt 后换新 output 目录，保留旧失败证据。配置模型名不代表已独立验证供应商真实部署身份。
+第五章评估为21条分类与12条流程，保存实际节点、工具回执、引用、策略SHA与确认工单SQL证据；逐例填写review.status和具体reason后才可通过。退出0通过、1失败、2待评；缺例、重复、中断不能报全部通过。修Prompt换新目录保留失败证据。smoke_workflow是同一完整采集器别名；第2章smoke_tools/evaluate_tools仅保留历史边界，不能用于新版自动工单验收。配置模型名不代表已验证供应商真实部署身份。
 
 售后提取继续使用 `/api/after-sales/extract`，字段为 order_id/request_type/expected_solution；使用 LangChain with_structured_output 的 json_mode 或 json_schema，不绑定业务工具。`examples/after-sales.json` 和 `scripts.smoke` 保留兼容；第 1 章历史评估是当时纯对话边界的证据，不直接代表第 2 章策略。
 
 ## 代码与过程记录
 
-API → ChatService → ToolRegistry / ModelGateway → ChatRepository → SQLAlchemy；会话及消息短事务，不在模型等待期间占用数据库连接。原四表faq、conversations、messages、tickets之外，第3章使用用户DDL的knowledge_chunks、qa_extraction_staging，审核记录存在本地知识目录，不新增SQL表/列。工单与会话状态和成功tool回执同事务。
+API→WorkflowChatService→LangGraph/AgentSteps→原ToolRegistry/ModelGateway→Repository/MySQL；独立SQLite checkpointer。第五章显式新增workflow_turns/actions两张元数据表；工单写入与成功工具回执同事务，不再绑定转人工。模型等待不占数据库连接。
+
+- 第5章设计/计划：docs/superpowers/specs/2026-11-05-ch05-workflow-agent-design.md、docs/superpowers/plans/2026-11-05-ch05-workflow-agent.md
+- 第5章开发记录：[dev-notes/ch05.md](dev-notes/ch05.md)；实际网页人工验收待用户反馈。
 
 - 第3章设计/计划：docs/superpowers/specs/2026-10-27-ch03-knowledge-console-design.md、docs/superpowers/plans/2026-10-27-ch03-knowledge-console.md
 - 第3章开发记录：dev-notes/ch03.md；新版真实分类/审核链路仍需用户按指南反馈。

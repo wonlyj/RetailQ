@@ -3,7 +3,7 @@ import shutil,subprocess
 import pytest
 
 
-@pytest.mark.parametrize('scenario',['validate','incomplete','handoff-cancel','handoff','ticket-cancel','dedupe','unknown','restore','restore-first','whitespace'])
+@pytest.mark.parametrize('scenario',['validate','incomplete','handoff-cancel','handoff','ticket-cancel','dedupe','unknown','restore','restore-first','whitespace','stream-contract'])
 def test_independent_actions_use_the_shipped_native_controller(scenario):
     node=shutil.which('node')
     if not node:

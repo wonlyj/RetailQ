@@ -26,7 +26,7 @@ async def test_classifier_uses_one_model_request_and_charges_shared_budget():
     from retailq.workflow.classification import IntentClassifier
     class Gateway:
         async def classify_intent(self,messages,*,max_tokens):
-            assert max_tokens == 256 and messages[-1].content == '你好'
+            assert max_tokens == 256 and [m for m in messages if m.type=='human'][-1].content == '你好'
             return '闲聊', UsageCharge(25,10,'provider')
     classifier = IntentClassifier(Gateway(),Settings(_env_file=None))
     result = await classifier.classify({'messages':[HumanMessage(content='你好')],'raw_question':'你好'})
@@ -43,6 +43,21 @@ async def test_no_budget_skips_even_classification_request():
         await IntentClassifier(Gateway(),Settings(_env_file=None,workflow_max_total_tokens=1)).classify(
             {'messages':[HumanMessage(content='你好')],'raw_question':'你好'})
     assert error.value.code=='workflow_budget_exceeded'
+
+
+@pytest.mark.anyio
+async def test_followup_classification_closes_context_with_current_role_instruction():
+    from langchain_core.messages import AIMessage,SystemMessage
+    from retailq.workflow.classification import IntentClassifier
+    class Gateway:
+        async def classify_intent(self,messages,*,max_tokens):
+            assert isinstance(messages[-1],SystemMessage)
+            assert '只输出' in messages[-1].content and 'intent' in messages[-1].content
+            assert any(m.type=='ai' and 'T_DEMO' in m.content for m in messages)
+            return '售后',None
+    result=await IntentClassifier(Gateway(),Settings(_env_file=None)).classify({'raw_question':'刚才工单编号是什么？',
+        'messages':[AIMessage(content='已确认工单T_DEMO'),HumanMessage(content='刚才工单编号是什么？')]})
+    assert result['route']=='business'
 
 
 @pytest.mark.anyio

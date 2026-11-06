@@ -10,6 +10,7 @@ class WorkflowUpstream:
         self.requests = []
         self.intent = '物流'
         self.answer_chunks=['订单1001：','以下为演示数据。']
+        self.require_decision_stage=False
         self.app = FastAPI()
         self.app.post('/chat/completions')(self.complete)
         self.app.post('/v1/chat/completions')(self.complete)
@@ -48,6 +49,8 @@ class WorkflowUpstream:
                 'arguments':json.dumps({'order_id':'1001'})}}
         calls = ([call, {**call,'id':'second'}] if self.scenario == 'parallel' else [call]) if name else []
         content = '' if calls else (self.bad_actions if self.bad_actions is not None else '{"actions":[]}')
+        if not calls and self.require_decision_stage and '[workflow_decision]' not in messages[-1].get('content',''):
+            content += '\n\n请提供订单号。'
         return JSONResponse({'id':'wf','object':'chat.completion','model':'test',
             'choices':[{'index':0,'message':{'role':'assistant','content':content,'tool_calls':calls},
                         'finish_reason':'tool_calls' if calls else 'stop'}],

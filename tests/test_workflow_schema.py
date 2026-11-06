@@ -20,3 +20,10 @@ def test_scope_guard_cannot_migrate_unrelated_database():
     from scripts.migrate_workflow import validate_scope
     from retailq.config import Settings
     with pytest.raises(ServiceError): validate_scope(Settings(_env_file=None,mysql_port=3308),'test')
+
+
+def test_acceptance_scope_only_allows_existing_isolated_3308():
+    from scripts.migrate_workflow import validate_scope
+    from retailq.config import Settings
+    validate_scope(Settings(_env_file=None,mysql_port=3308,mysql_database='retailq_test'),'acceptance')
+    with pytest.raises(ServiceError):validate_scope(Settings(_env_file=None,mysql_port=3306,mysql_database='retailq'),'acceptance')

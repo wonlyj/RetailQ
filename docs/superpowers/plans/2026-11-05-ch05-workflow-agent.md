@@ -218,7 +218,7 @@ def test_review_cannot_pass_unreviewed_case(report_path):
 - [x] 最终完整pytest **757 passed、0 skipped**（CH04_FAULT_DB=1，含显式3309故障项），pip check通过；独立锁环境相关100 passed。首轮723 passed/2旧契约失败及所有红绿证据保留，不用第4章历史报告替代本章结果。
 - [x] 独立只读审查固定起点2077c90至T8变更；初评1 Critical+7 Important+1 Minor。作者一次TDD修复R1–R8，完整757绿测关闭，日志细化Minor暂缓，无二审；详见代码审查记录，Native实现方式不变。
 - [x] 文档给完整PowerShell命令：依赖安装、隔离服务启动、显式05迁移、匹配语料/策略路径、裸循环演示、uvicorn启动、五个验收问题及确认按钮步骤。已在双worker上真实采集，恢复/跨进程锁另有测试；产品保持AsyncSqliteSaver。桌面指南已复制并核对SHA，GUI实际点击待用户。
-- [ ] 实际运行所有交付命令，记录启动/工具/节点/票据与恢复证据；更新README旧“每轮一个工具”“工单=已转人工”等过时说明，并保留随机演示/本地身份/SQLite限制。最后按 verification-before-completion、finishing-a-development-branch 执行已授权本地main收尾；finish即时追记四项，本地提交，推送等待用户指示。
+- [x] Agent可执行的依赖/Compose/显式迁移/裸循环/双worker/评估及SQL核查命令已运行，README边界更新；网页打开/点击按用户安排由其执行。verification-before-completion与finishing-a-development-branch已完成本地main集成，功能提交e5b05f9，不推送。日志归档136文件逐一SHA核对，finish即时追加；T7实际GUI待反馈。
 
 ## 自审与执行交接
 

@@ -22,4 +22,6 @@ v2采集先GET本机只读`/api/workflow/identity`核对3308数据库摘要，�
 
 独立代码审查首次结论No（1 Critical、7 Important）；作者在一次fix pass中逐项红绿测试修复，完整绿测关闭，未派二审。详见[代码审查记录](superpowers/reviews/2026-11-05-ch05-code-review.md)。1项Minor：节点失败日志阶段/预算来源细化暂缓，SSE已有进入事件。bare controlled/real演示均完成先订单后物流2工具/4模型请求。Compose、显式acceptance迁移、双worker及SQL核查命令已实跑；网页打开和实际点击仍由用户执行。
 
+完整过程与测试日志归档于`artifacts/verification/ch05/native-20261106-final/`，136份文件已逐一比对SHA，`_manifest.json`记录校验值；本计划的临时`.superpowers`目录按Native流程清理。真实评估A–G仍在各自独立目录，不覆盖历史。最新桌面指南与仓库副本SHA：`0F22029116E21736943AB72BD346552D833EB35686345DBF3AACCBCB2ACBD073`。
+
 证据边界：12条流程是小样本功能检查，不代表生产泛化；相关性闸可能放行“未知商品+通用退货政策”，不能将未触发弱分分支报告成真实弱证据拦截。确定性弱证据分支另有集成测试。业务工具为随机演示数据，核对当轮实际回执，不对跨次随机内容作稳定性承诺。

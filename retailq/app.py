@@ -13,6 +13,8 @@ from pydantic import ValidationError
 from retailq.api.chat import router as chat_router
 from retailq.api.knowledge import router as knowledge_router
 from retailq.api.sources import router as sources_router
+from retailq.api.actions import router as actions_router
+from retailq.workflow.actions import TicketActionService
 from retailq.api.knowledge_access import require_console_local
 from retailq.db import Database
 from retailq.repositories import ChatRepository
@@ -44,10 +46,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise RuntimeError("应用配置无效，请检查 .env 配置。") from None
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        gateway=database=knowledge=scheduler=service=jobs=workflow_context=None
+        gateway=database=knowledge=scheduler=service=jobs=workflow_context=action_service=None
         application.state.knowledge_failure=None
         application.state.workflow_failure=None
         application.state.workflow_repository=None
+        application.state.ticket_actions=None
         try:
             gateway = OpenAIModelGateway(settings) if settings.is_ready else None
             application.state.gateway = gateway
@@ -82,6 +85,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 try:
                     runtime=await workflow_context.__aenter__()
                     service=WorkflowChatService(runtime)
+                    action_service=TicketActionService(workflow_repository,repository,runtime.coordinator,settings)
+                    application.state.ticket_actions=action_service
                 except ServiceError as exc:
                     application.state.workflow_failure=exc
                     workflow_context=None
@@ -94,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             with anyio.CancelScope(shield=True):
                 try:
+                    if action_service is not None:await action_service.aclose()
                     if service is not None:
                         await service.aclose()
                 finally:
@@ -120,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(chat_router)
     application.include_router(knowledge_router)
     application.include_router(sources_router)
+    application.include_router(actions_router)
     web_directory = Path(__file__).parent / "web"
     application.mount("/assets", StaticFiles(directory=web_directory), name="chat-assets")
 

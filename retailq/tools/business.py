@@ -52,7 +52,7 @@ def business_tools(repository, context):
 
     @tool(args_schema=TicketInput)
     async def create_ticket(description: str, ticket_type: str) -> dict:
-        """用户明确要求人工处理、投诉或售后并说明问题后创建工单。仅创建待处理工单，不执行退款或即时接通人工。"""
+        """仅在用户前端独立确认后创建待处理工单；不改变会话转人工状态，不执行退款或即时接通人工。"""
         if not context.tool_call_id:
             raise ServiceError('missing_tool_request',409,'缺少工具申请。')
         return await asyncio.to_thread(repository.create_ticket, context.conversation_id, context.user_id,

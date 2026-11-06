@@ -166,7 +166,7 @@ async def test_restart_preserves_state_and_clears_no_history(restarted_graph, co
 
 **Interfaces:** `TicketActionService.confirm(cid:int,user_id:str,action_id:str,description:str,ticket_type:str)->TicketActionResult` async；`.get(cid:int,user_id:str,action_id:str)->TicketActionResult` async；`.aclose()->None` async等待本服务持有的后台收尾任务。API `POST /api/conversations/{cid}/actions/{action_id}/ticket` body `{user_id,description,ticket_type}`，`GET`同路径以user_id查询状态；`WorkflowRepository.claim_action(cid:int,user_id:str,action_id:str,description:str,ticket_type:str)->dict` 返回action_id/status/tool_call_id/origin_assistant_message_id/request_hash/result；`.settle_action(cid:int,user_id:str,action_id:str,outcome:ToolOutcome)->TicketActionResult`。方法均短事务并使用同会话锁；claim返回旧终态时禁止再次调用工具。
 
-- [ ] 写真实MySQL红测试：投诉建议本身零tickets；确认只调用现有create_ticket，成功为待处理且conversation.status不改已转人工；handoff无后端写接口。重复同动作同payload返回原票据，改payload冲突409；伪造action、跨用户、无ticket建议404/409；处理中返回busy、不排队；继续聊天不执行动作。
+- [x] 写真实MySQL红测试：投诉建议本身零tickets；确认只调用现有create_ticket，成功为待处理且conversation.status不改已转人工；handoff无后端写接口。重复同动作同payload返回原票据，改payload冲突409；伪造action、跨用户、无ticket建议404/409；处理中返回busy、不排队；继续聊天不执行动作。
 
 ```python
 async def test_confirm_twice_reuses_ticket(action_service, ticket_args):
@@ -175,12 +175,12 @@ async def test_confirm_twice_reuses_ticket(action_service, ticket_args):
     assert first.ticket['ticket_no'] == second.ticket['ticket_no']
     # 另以真实SQL断言票据增量为1、会话status仍为进行中。
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_actions.py tests/test_tools.py tests/test_repositories.py -q`，确认新增行为为红，实现动作验证/确认与工具复用，删除旧status副作用并改说明；call ID由action稳定派生，<=64，来源user_action+origin消息ID保存到动作/申请元数据，不能由客户端指定工具名/会话身份。
-- [ ] claim在锁内冻结description/type/hash，写executing及唯一tool request；工具成功及原tool回执维持同事务；settle更新动作。若进程在票据提交后、settle前退出，GET通过稳定tool回执核对并恢复completed；若executing无确定回执，标unknown、不重新执行。pending/unknown不自动重试；重复请求只查询，前端可GET核对状态。
-- [ ] 明确后台租约所有权：工具超时返回pending或POST被取消时，不能在请求finally中释放会话租约。TicketActionService保留registry、lease及后台settle任务的强引用，等待 `registry.drain()`，核对持久回执并更新动作状态，最后释放lease；与现有ChatService.release语义一致。GET可读待确认状态，写对账仍须持有会话锁，不能和后台任务抢同一动作。lifespan先停止接收新动作、等待action_service.aclose完成，再关闭MySQL，不对aclose套用会使数据库先关闭的短路超时；若外部强制终止进程，保留unknown/executing供重启对账，不报告正常关闭、未写入或已取消后台写操作。
-- [ ] 写故障/竞态测试：工具写超时仍可能后台成功；确认连接断开/刷新不重POST；跨服务并发同动作仅1票据；最终回执与action状态落差可核对，结果不得错误显示为未创建。旧气泡在新轮后确认仍绑定旧来源，下一轮T3投影正确。
-- [ ] 增加受控慢写测试：POST已超时/取消但后台工具仍阻塞时，第二服务的同会话chat/confirm必须409，其他会话仍可继续；释放阻塞后只有1票据、原租约才释放、随后新聊天可继续并看到工单事实；aclose等待的测试先确认数据库尚未关闭，再放行写入并断言有序退出。
-- [ ] 运行本任务及工单相关回归，记录实际SQL票据计数与status；留痕并提交 `feat: require explicit independent ticket confirmation`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_actions.py tests/test_tools.py tests/test_repositories.py -q`，确认新增行为为红，实现动作验证/确认与工具复用，删除旧status副作用并改说明；call ID由action稳定派生，<=64，来源user_action+origin消息ID保存到动作/申请元数据，不能由客户端指定工具名/会话身份。
+- [x] claim在锁内冻结description/type/hash，写executing及唯一tool request；工具成功及原tool回执维持同事务；settle更新动作。若进程在票据提交后、settle前退出，GET通过稳定tool回执核对并恢复completed；若executing无确定回执，标unknown、不重新执行。pending/unknown不自动重试；重复请求只查询，前端可GET核对状态。
+- [x] 明确后台租约所有权：工具超时返回pending或POST被取消时，不能在请求finally中释放会话租约。TicketActionService保留registry、lease及后台settle任务的强引用，等待 `registry.drain()`，核对持久回执并更新动作状态，最后释放lease；与现有ChatService.release语义一致。GET可读待确认状态，写对账仍须持有会话锁，不能和后台任务抢同一动作。lifespan先停止接收新动作、等待action_service.aclose完成，再关闭MySQL，不对aclose套用会使数据库先关闭的短路超时；若外部强制终止进程，保留unknown/executing供重启对账，不报告正常关闭、未写入或已取消后台写操作。
+- [x] 写故障/竞态测试：工具写超时仍可能后台成功；确认连接断开/刷新不重POST；跨服务并发同动作仅1票据；最终回执与action状态落差可核对，结果不得错误显示为未创建。旧气泡在新轮后确认仍绑定旧来源，下一轮T3投影正确。
+- [x] 增加受控慢写测试：POST已超时/取消但后台工具仍阻塞时，第二服务的同会话chat/confirm必须409，其他会话仍可继续；释放阻塞后只有1票据、原租约才释放、随后新聊天可继续并看到工单事实；aclose等待的测试先确认数据库尚未关闭，再放行写入并断言有序退出。
+- [x] 运行本任务及工单相关回归，记录实际SQL票据计数与status；留痕并提交 `feat: require explicit independent ticket confirmation`。
 
 ### T7：原生聊天页两个按钮与确认交互
 

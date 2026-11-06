@@ -11,7 +11,7 @@ from retailq.errors import ServiceError
 from retailq.models import Conversation,Message
 from retailq.repositories import ChatRepository,MessageRecord,database_errors
 from retailq.knowledge.rag_models import LowConfidenceQuestion
-from retailq.workflow.contracts import FinalizedTurn,TurnRef
+from retailq.workflow.contracts import FinalizedTurn,TurnRef,TicketActionResult
 from retailq.workflow.models import WorkflowAction,WorkflowTurn
 
 
@@ -192,3 +192,56 @@ class WorkflowRepository:
                 return citations
             except (KeyError,TypeError,ValueError,ValidationError):
                 raise ServiceError('citation_invalid',409,'工作流引用快照不完整，请核查。') from None
+
+    def _action(self,session,cid,user_id,action_id,*,lock=False):
+        ChatRepository._owned(session,cid,user_id,lock=lock)
+        statement=select(WorkflowAction).join(WorkflowTurn).where(WorkflowAction.action_id==action_id,
+            WorkflowTurn.conversation_id==cid,WorkflowAction.kind=='ticket')
+        row=session.scalar(statement.with_for_update() if lock else statement)
+        if row is None:raise ServiceError('workflow_action_not_found',404,'未找到该会话的工单建议。')
+        return row
+
+    @database_errors
+    def read_action(self,cid,user_id,action_id):
+        with self.database.sessions() as session:
+            row=self._action(session,cid,user_id,action_id)
+            return TicketActionResult(row.action_id,row.status,row.result)
+
+    @database_errors
+    def claim_action(self,cid,user_id,action_id,description,ticket_type):
+        request_hash=digest({'description':description,'ticket_type':ticket_type})
+        with self.database.sessions.begin() as session:
+            row=self._action(session,cid,user_id,action_id,lock=True)
+            if row.request_hash is not None and row.request_hash!=request_hash:
+                raise ServiceError('workflow_action_conflict',409,'该动作已确认其他内容，请先核查原工单。')
+            is_new=row.status=='offered'
+            if is_new:
+                arguments={'description':description,'ticket_type':ticket_type}
+                wire={'id':row.tool_call_id,'type':'function','source':'user_action',
+                    'origin_assistant_message_id':str(row.origin_assistant_message_id),
+                    'function':{'name':'create_ticket','arguments':json.dumps(arguments,ensure_ascii=False)}}
+                message=Message(conversation_id=cid,role='assistant',content=None,tool_calls=[wire])
+                session.add(message);session.flush()
+                row.request_hash=request_hash;row.status='executing';row.request_message_id=message.id
+            return {**action_view(row),'tool_call_id':row.tool_call_id,'request_hash':row.request_hash,'is_new':is_new}
+
+    @database_errors
+    def settle_action(self,cid,user_id,action_id,outcome):
+        with self.database.sessions.begin() as session:
+            row=self._action(session,cid,user_id,action_id,lock=True)
+            if row.status!='completed':
+                row.status='completed' if outcome.payload['ok'] else 'unknown'
+                row.result=outcome.payload.get('data') if outcome.payload['ok'] else None
+            return TicketActionResult(row.action_id,row.status,row.result)
+
+    @database_errors
+    def reconcile_action(self,cid,user_id,action_id):
+        with self.database.sessions.begin() as session:
+            row=self._action(session,cid,user_id,action_id,lock=True)
+            if row.status not in ('offered','completed'):
+                receipt=session.scalar(select(Message).where(Message.conversation_id==cid,Message.role=='tool',
+                    Message.tool_call_id.collate('utf8mb4_0900_bin')==row.tool_call_id))
+                payload=json.loads(receipt.content) if receipt else {}
+                if payload.get('ok') is True:row.status='completed';row.result=payload['data']
+                else:row.status='unknown'
+            return TicketActionResult(row.action_id,row.status,row.result)

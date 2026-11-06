@@ -148,7 +148,6 @@ class ChatRepository:
             ticket_no = 'T' + datetime.now().strftime('%Y%m%d') + secrets.token_hex(8).upper()
             session.add(Ticket(ticket_no=ticket_no, conversation_id=conversation_id,
                                description=description, ticket_type=ticket_type))
-            conversation.status = '已转人工'
             result = {'ticket_no': ticket_no, 'ticket_type': ticket_type, 'status': '待处理'}
             session.add(Message(conversation_id=conversation_id, role='tool', tool_call_id=tool_call_id,
                                 content=json.dumps({'ok': True, 'data': result}, ensure_ascii=False)))

@@ -80,7 +80,7 @@ def test_ticket_commit_receipt_atomic_and_repeat_safe(repository, test_database)
     again = repository.create_ticket(cid, 'alice', '订单1001延迟', '投诉', 'ticket_call_1')
     assert again == result
     with test_database.sessions() as session:
-        assert session.get(Conversation, cid).status == '已转人工'
+        assert session.get(Conversation, cid).status == '进行中'
         assert session.scalar(select(func.count()).select_from(Ticket).where(Ticket.conversation_id == cid)) == 1
     from retailq.repositories import ChatRepository
     records = ChatRepository(test_database).load_messages(cid, 'alice')

@@ -127,7 +127,7 @@ $RunDir = 'artifacts/evals/ch05/run-' + (Get-Date -Format yyyyMMdd-HHmmss)
 API→WorkflowChatService→LangGraph/AgentSteps→原ToolRegistry/ModelGateway→Repository/MySQL；独立SQLite checkpointer。第五章显式新增workflow_turns/actions两张元数据表；工单写入与成功工具回执同事务，不再绑定转人工。模型等待不占数据库连接。
 
 - 第5章设计/计划：docs/superpowers/specs/2026-11-05-ch05-workflow-agent-design.md、docs/superpowers/plans/2026-11-05-ch05-workflow-agent.md
-- 第5章开发记录：[dev-notes/ch05.md](dev-notes/ch05.md)；实际网页人工验收待用户反馈。
+- 第5章开发记录：[dev-notes/ch05.md](dev-notes/ch05.md)；2026-11-06用户已按人工指南执行完成，反馈无报错。
 
 - 第3章设计/计划：docs/superpowers/specs/2026-10-27-ch03-knowledge-console-design.md、docs/superpowers/plans/2026-10-27-ch03-knowledge-console.md
 - 第3章开发记录：dev-notes/ch03.md；新版真实分类/审核链路仍需用户按指南反馈。

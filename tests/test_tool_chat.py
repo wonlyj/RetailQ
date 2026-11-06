@@ -13,7 +13,7 @@ from retailq.repositories import ChatRepository
 from tests.support.database import chat_settings
 from tests.support.servers import run_server
 from tests.support.tool_upstream import ControlledToolUpstream, wire_call
-from tests.test_chat_api import parse_sse
+from tests.test_chat_api import core_events as parse_sse
 
 pytestmark = pytest.mark.mysql
 
@@ -56,27 +56,25 @@ def test_sse_logistics_persisted_roundtrip(test_database):
         upstream.selection_reason = 'stop'
         second = client.post('/api/chat/stream',json={'message':'刚才订单号','conversation_id':cid,'user_id':'alice'})
         assert parse_sse(second.text)[-1][0] == 'done'
-        wire = upstream.requests[2][0]['messages']
+        wire = upstream.requests[5][0]['messages']
         assert [m['role'] for m in wire] == ['system','user','assistant','tool','assistant','user']
         assert repo.load_messages(cid,'alice')[-1].role == 'assistant'
         assert client.post('/api/chat/stream',json={'message':'偷看','conversation_id':cid,'user_id':'bob'}).status_code == 404
 
 
-def test_case_distinct_call_ids_keep_separate_receipts_and_create_ticket(test_database):
+def test_case_distinct_call_ids_keep_separate_read_receipts(test_database):
     upstream = ControlledToolUpstream([wire_call('query_order',{'order_id':'1001'},'call_1')])
     repo = ChatRepository(test_database)
     with run_server(upstream.app) as url, TestClient(create_app(chat_settings(url))) as client:
         first = parse_sse(client.post('/api/chat/stream',json={'message':'查订单1001','user_id':'alice'}).text)
         cid = first[0][1]['conversation_id']
-        upstream.calls = [wire_call('create_ticket',{'description':'订单1001延迟','ticket_type':'投诉'},'CALL_1')]
-        second = parse_sse(client.post('/api/chat/stream',json={'message':'请创建投诉工单','user_id':'alice','conversation_id':cid}).text)
+        upstream.calls = [wire_call('query_logistics',{'order_id':'1001'},'CALL_1')]
+        second = parse_sse(client.post('/api/chat/stream',json={'message':'再查物流1001','user_id':'alice','conversation_id':cid}).text)
         assert second[-1] == ('done',{'finish_reason':'stop'})
         receipts = {r.tool_call_id:json.loads(r.content) for r in repo.load_messages(cid,'alice') if r.role=='tool'}
         assert set(receipts) == {'call_1','CALL_1'}
         assert receipts['call_1']['data']['order_id'] == '1001'
-        number = receipts['CALL_1']['data']['ticket_no']
-        with test_database.sessions() as session:
-            assert session.get(Ticket,number).conversation_id == cid
+        assert receipts['CALL_1']['data']['order_id']=='1001'
         # append_message's duplicate check must use the same exact comparison.
         repo.append_message(cid,'alice','tool','{"ok":false}',None,'CaLl_1')
         assert len([r for r in repo.load_messages(cid,'alice') if r.role=='tool'])==3
@@ -106,28 +104,25 @@ def test_tool_failures_and_no_tool_contract(test_database, monkeypatch, case):
     upstream = ControlledToolUpstream(**kwargs)
     with run_server(upstream.app) as url, TestClient(create_app(chat_settings(url))) as client:
         if case == 'final_commit':
-            repo = client.app.state.chat_service.repository
-            original = repo.append_message
-            def fail(cid,user,role,content,*args,**kw):
-                if role=='assistant' and content and not args:
-                    raise ServiceError('database_unavailable',503,'数据库操作未确认成功。')
-                return original(cid,user,role,content,*args,**kw)
-            monkeypatch.setattr(repo,'append_message',fail)
+            repo = client.app.state.chat_service.workflow_repository
+            def fail(*args,**kw):raise ServiceError('database_unavailable',503,'数据库操作未确认成功。')
+            monkeypatch.setattr(repo,'finalize',fail)
         response = client.post('/api/chat/stream',json={'message':'物流1001','user_id':'alice'})
         events = parse_sse(response.text)
         assert response.status_code == 200
-        if case in ['multiple','eof','second_tool','final_commit']:
+        if case in ['multiple','unknown','eof','second_tool','final_commit']:
             assert events[-1][0] == 'error'
             assert not any(e[0]=='done' for e in events)
         else:
             assert events[-1] == ('done',{'finish_reason':'length' if case=='length' else 'stop'})
-        if case in ['invalid','unknown']:
+        if case == 'invalid':
             status = [d for e,d in events if e=='tool_status'][-1]
             assert status['status'] == 'failed'
-            assert json.loads(upstream.requests[-1][0]['messages'][-1]['content'])['ok'] is False
+            receipt=next(m for m in reversed(upstream.requests[-1][0]['messages']) if m['role']=='tool')
+            assert json.loads(receipt['content'])['ok'] is False
         if case == 'no_tool':
             assert not any(e[0]=='tool_status' for e in events)
-            assert len(upstream.requests)==2
+            assert len(upstream.requests)==3
         if case == 'multiple':
             with test_database.sessions() as session:
                 assert session.scalar(select(func.count()).select_from(Ticket))==1
@@ -148,13 +143,13 @@ def test_dsml_answer_is_not_streamed_or_saved_as_a_successful_reply(test_databas
 
 
 @pytest.mark.anyio
-async def test_disconnect_after_ticket_commit_and_concurrent_409(test_database):
-    upstream = ControlledToolUpstream([wire_call('create_ticket',{'description':'订单1001延迟','ticket_type':'投诉'})],gated=True)
+async def test_disconnect_after_query_receipt_and_concurrent_409(test_database):
+    upstream = ControlledToolUpstream([wire_call('query_order',{'order_id':'1001'})],gated=True)
     repo = ChatRepository(test_database)
     with run_server(upstream.app) as url, run_server(create_app(chat_settings(url))) as api_url:
         try:
             async with httpx.AsyncClient(trust_env=False,timeout=8) as client:
-                async with client.stream('POST',api_url+'/api/chat/stream',json={'message':'订单1001请建投诉工单','user_id':'alice'}) as response:
+                async with client.stream('POST',api_url+'/api/chat/stream',json={'message':'查订单1001','user_id':'alice'}) as response:
                     block=[]
                     cid=None
                     async for line in response.aiter_lines():
@@ -174,6 +169,6 @@ async def test_disconnect_after_ticket_commit_and_concurrent_409(test_database):
                         if any(r.role=='tool' for r in rows): break
                         await asyncio.sleep(0.01)
                 assert [r.role for r in rows]==['user','assistant','tool']
-                assert json.loads(rows[-1].content)['data']['ticket_no']
+                assert json.loads(rows[-1].content)['data']['order_id']=='1001'
         finally:
             upstream.release.set()

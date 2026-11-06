@@ -34,21 +34,26 @@ def parse_sse(text):
     return events
 
 
+def core_events(text):
+    """Legacy core-event assertions; workflow/actions are covered in ch05 tests."""
+    return [(kind,data) for kind,data in parse_sse(text) if kind not in ('workflow','actions')]
+
+
 def test_chat_sse_contract_and_client_history():
     upstream = ControlledUpstream(chunks=["您", "好\n"])
     with run_server(upstream.app) as url, TestClient(create_app(settings_for(url))) as client:
         response = client.post("/api/chat/stream", json={"message": "订单00123"})
         assert response.headers["content-type"].startswith("text/event-stream")
-        events = parse_sse(response.text)
+        events = core_events(response.text)
         assert [e[0] for e in events] == ["meta", "token", "token", "done"]
         assert events[1:3] == [("token", {"text": "您"}), ("token", {"text": "好\n"})]
         assert events[0][1]["dropped_history_messages"] == 0
         assert events[-1][1] == {"finish_reason": "stop"}
         history = [{"role": "user", "content": "订单00123"}, {"role": "assistant", "content": "您好"}]
         client.post("/api/chat/stream", json={"message": "刚才订单号？", "history": history})
-        assert [m["content"] for m in upstream.requests[2][0]["messages"]][1:] == ["订单00123", "您好", "刚才订单号？"]
+        assert [m["content"] for m in upstream.requests[4][0]["messages"]][1:] == ["订单00123", "您好", "刚才订单号？"]
         client.post("/api/chat/stream", json={"message": "新会话"})
-        assert len(upstream.requests[4][0]["messages"]) == 2
+        assert len(upstream.requests[7][0]["messages"]) == 2
 
 
 def test_pre_stream_errors_do_not_call_model():
@@ -72,14 +77,14 @@ def test_pre_stream_errors_do_not_call_model():
 def test_stream_error_and_finish_reason(kwargs, last_event):
     upstream = ControlledUpstream(**kwargs)
     with run_server(upstream.app) as url, TestClient(create_app(settings_for(url, model_timeout_seconds=0.5))) as client:
-        events = parse_sse(client.post("/api/chat/stream", json={"message": "你好"}).text)
+        events = core_events(client.post("/api/chat/stream", json={"message": "查询订单00123"}).text)
         assert events[-1][0] == last_event
         if last_event == "error":
             assert not any(event == "done" for event, _ in events)
             assert "sensitive-upstream-secret" not in json.dumps(events)
         else:
             assert events[-1][1]["finish_reason"] == "length"
-        assert upstream.request_count == (1 if kwargs.get('status') == 500 else 2)
+        assert upstream.request_count == (1 if kwargs.get('status') == 500 else 3)
 
 
 @pytest.mark.anyio
@@ -88,7 +93,7 @@ async def test_first_token_arrives_before_completion_and_disconnect():
     with run_server(upstream.app) as upstream_url, run_server(create_app(settings_for(upstream_url))) as api_url:
         try:
             async with httpx.AsyncClient(trust_env=False, timeout=3) as client:
-                async with client.stream("POST", api_url + "/api/chat/stream", json={"message": "你好"}) as response:
+                async with client.stream("POST", api_url + "/api/chat/stream", json={"message": "查询订单00123"}) as response:
                     assert response.status_code == 200
                     lines = response.aiter_lines()
                     block = []
@@ -97,7 +102,7 @@ async def test_first_token_arrives_before_completion_and_disconnect():
                             if line:
                                 block.append(line)
                             else:
-                                events = parse_sse("\n".join(block) + "\n\n")
+                                events = core_events("\n".join(block) + "\n\n")
                                 block = []
                                 if events and events[0][0] == "token":
                                     assert events[0][1] == {"text": "您好"}

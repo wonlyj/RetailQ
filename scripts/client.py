@@ -29,6 +29,7 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
     terminal = None
     metadata = {}
     tool_status = []
+    workflow, actions, sources = [], [], []
     body = {'message':message,'history':history,'user_id':user_id}
     if conversation_id is not None:
         body['conversation_id'] = conversation_id
@@ -68,6 +69,25 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
                                 or payload.get('status') not in ('running','completed','failed')):
                             raise ApiFailure('invalid_tool_status')
                         tool_status.append(payload)
+                    elif event == 'workflow':
+                        if not isinstance(payload.get('node'),str) or payload.get('phase') not in ('enter','exit'):
+                            raise ApiFailure('invalid_workflow_event')
+                        workflow.append(payload)
+                    elif event == 'actions':
+                        items=payload.get('actions')
+                        if (not isinstance(payload.get('message_id'),str) or not payload['message_id'].isdigit()
+                                or not isinstance(items,list) or len(items)>2 or
+                                any(not isinstance(a,dict) or a.get('kind') not in ('handoff','ticket') or
+                                    not isinstance(a.get('action_id'),str) for a in items)):
+                            raise ApiFailure('invalid_actions_event')
+                        actions=items
+                    elif event == 'sources':
+                        from retailq.api.source_schemas import PublicCitation
+                        try:
+                            if not isinstance(payload.get('citations'),list):raise ValueError()
+                            sources=[PublicCitation.model_validate(c).model_dump() for c in payload['citations']]
+                            if not isinstance(payload.get('message_id'),str):raise ValueError()
+                        except (TypeError,ValueError):raise ApiFailure('invalid_sources_event') from None
                     elif event == "done":
                         terminal = payload.get("finish_reason")
                     else:
@@ -77,7 +97,8 @@ async def chat(client: httpx.AsyncClient, base_url: str, message: str, history: 
         raise ApiFailure("incomplete_or_truncated_stream")
     return {"text": "".join(text), "token_events": len(text), "first_token_seconds": first,
             "total_seconds": time.perf_counter() - start, "finish_reason": terminal, "meta": metadata,
-            'conversation_id':metadata.get('conversation_id'),'tool_status':tool_status}
+            'conversation_id':metadata.get('conversation_id'),'tool_status':tool_status,
+            'workflow':workflow,'actions':actions,'sources':sources}
 
 
 async def extract(client: httpx.AsyncClient, base_url: str, description: str) -> dict:

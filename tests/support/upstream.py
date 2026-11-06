@@ -33,8 +33,13 @@ class ControlledUpstream:
             if not body.get("stream"):
                 if self.nonstream_delay:
                     await asyncio.sleep(self.nonstream_delay)
+                if '[workflow_intent]' in body['messages'][0].get('content',''):
+                    content='{"intent":"订单"}'  # Protocol fixture, not a semantic classifier.
+                elif '[workflow_agent]' in body['messages'][0].get('content',''):
+                    content='{"actions":[]}'
+                else: content=self.text
                 return {"id": "chatcmpl-test", "object": "chat.completion", "created": 0, "model": "test-model",
-                        "choices": [{"index": 0, "message": {"role": "assistant", "content": self.text}, "finish_reason": "stop"}]}
+                        "choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}]}
 
             async def stream():
                 def event(delta, reason=None):

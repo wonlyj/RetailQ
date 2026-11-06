@@ -35,8 +35,8 @@ async def test_smoke_carries_actual_history(test_database):
         report = await run_smoke(api)
         assert report["status"] == "pass"
         assert report["round1"]["token_events"] == 2
-        assert upstream.requests[3][0]["messages"][-2] == {"role": "assistant", "content": "订单00123"}
-        assert len(upstream.requests) == 5
+        assert upstream.requests[4][0]["messages"][-2] == {"role": "assistant", "content": "订单00123"}
+        assert len(upstream.requests) == 7  # two classifier/decision/answer rounds + extraction
 
 
 @pytest.mark.anyio
@@ -47,7 +47,7 @@ async def test_smoke_rejects_truncation_and_error(test_database):
     with run_server(upstream.app) as url, run_server(create_app(settings_for(url))) as api:
         report = await run_smoke(api)
         assert report["status"] == "fail"
-        assert upstream.request_count == 2
+        assert upstream.request_count == 3
 
 
 def test_empty_or_unreviewed_report_cannot_pass():

@@ -143,8 +143,8 @@ def test_answer_rejects_out_of_bundle_number(citations):
 
 **Interfaces:** `build_graph(agent:AgentSteps,classifier:IntentClassifier,evidence:EvidenceSteps,repository:WorkflowRepository,checkpointer:AsyncSqliteSaver)->CompiledStateGraph`；`WorkflowRuntime.open(settings:Settings,repository:WorkflowRepository,chat_repository:ChatRepository,gateway:OpenAIModelGateway,knowledge:KnowledgeRuntime|None,policy:DynamicConfidencePolicy|None,coordinator:Coordinator)` 是async context manager。runtime提供 `.graph_for(turn:PreparedWorkflowTurn)->CompiledStateGraph` / `.rebase(turn:TurnRef,projection:list[list[BaseMessage]])->WorkflowState` async / `.config_for(cid:int)->dict`。`WorkflowChatService.prepare(body:ChatRequest)->PreparedWorkflowTurn`、`.stream(turn:PreparedWorkflowTurn)->AsyncIterator[ChatEvent]`、`.release(turn:PreparedWorkflowTurn)->None`、`.aclose()->None`兼容API生命周期。PreparedWorkflowTurn包含TurnRef、user_id、prepared、registry、lease/released；每个请求单独创建agent/registry/emit绑定并compile到共享saver，不将可变请求对象存到全局steps，避免跨会话串流。graph_for生成的相同拓扑使用同一thread_id恢复。
 
-- [ ] 先按Context7核对目标LangGraph与saver版本/API及Python3.12兼容性，用 pip dry-run 对现有锁版本约束解析新增依赖；仅新增依赖及其传递依赖，若必须升级已有固定栈先停问用户。解析版本写进记录后，锁文件安装、pip check；独立环境按锁安装验证。核对 astream/custom/durability/AsyncSqliteSaver真实签名，不默认依赖version=v2输出格式。
-- [ ] 写红测试：graph节点/固定路由覆盖七类；AsyncSqliteSaver关闭重开同一文件仍读到State；API主入口默认且唯一走新图，知识关闭也有跨服务会话互斥；旧会话初始化、归属不匹配404、同会话409、不同会话可独立运行；缺工作流表/不可写SQLite启动明确不可用、不退回旧ChatService。
+- [x] 先按Context7核对目标LangGraph与saver版本/API及Python3.12兼容性，用 pip dry-run 对现有锁版本约束解析新增依赖；仅新增依赖及其传递依赖，若必须升级已有固定栈先停问用户。解析版本写进记录后，锁文件安装、pip check；独立环境按锁安装验证。核对 astream/custom/durability/AsyncSqliteSaver真实签名，不默认依赖version=v2输出格式。
+- [x] 写红测试：graph节点/固定路由覆盖七类；AsyncSqliteSaver关闭重开同一文件仍读到State；API主入口默认且唯一走新图，知识关闭也有跨服务会话互斥；旧会话初始化、归属不匹配404、同会话409、不同会话可独立运行；缺工作流表/不可写SQLite启动明确不可用、不退回旧ChatService。
 
 ```python
 async def test_restart_preserves_state_and_clears_no_history(restarted_graph, config):
@@ -152,13 +152,13 @@ async def test_restart_preserves_state_and_clears_no_history(restarted_graph, co
     assert snapshot.values['raw_question'] == '订单1001的物流到哪了'
     assert snapshot.next == ()
 ```
-- [ ] 运行 `& $ProjectPython -m pytest tests/test_workflow_graph.py tests/test_workflow_recovery.py tests/test_workflow_chat.py -q` 确认红；实现 spec 图，graph 节点使用 T1单步/T2分类/T4检索，最终log节点调T3 finalize；compile时注入saver，astream使用custom或custom+updates与 `durability='sync'`，把业务事件映射SSE，不把checkpoint内部数据发前端。
-- [ ] 实现 lifespan打开/关闭saver与图资源；构造会话锁不依赖knowledge是否启用，沿用Coordinator同主机数据库作用域。thread_id由规范化数据库身份+cid生成；同一SQLite文件不可意外绑定不同数据库身份，单独绑定元数据防串环境。运行时对象由闭包注入，State只含可序列化数据；超时不依赖跨重启单调时间比较。
-- [ ] rebase持锁先核对MySQL终态与checkpoint：未完成旧turn标interrupted，禁止 `ainvoke(None)`/自动续跑。若snapshot.next仍有任务，用公开 `aupdate_state(...,as_node='log')` 写已中断快照并验证next为空，再带新输入启动START；不调用旧log业务函数、不改私有表。MySQL已完成而checkpoint落后时保留完成事实，清除旧pending但不重复finalize；无法安全对账则报可识别错误，不自动重放。
-- [ ] 流顺序：meta先出；节点状态/工具状态及上游token过程中发送；graph退出且sync checkpoint成功后，读取已完成turn，再发sources/actions/done。length保留截断提示但无完整答复/动作；checkpoint/log/最终事务失败只error。取消时记终态、关闭生成器，shield仅短写；等待未完成同步任务结束后释放租约。scripts/client.py支持并校验workflow/actions/新sources，旧来源兼容，仍拒绝unknown帧和done后事件。
-- [ ] 入口旧测试中的固定两次模型调用/固定帧序列更新为分类+Agent+真实流的契约；首字延迟/断开测试使用business问题，不用已固定回复的“你好”测模型流。网关自身协议故障仍独立覆盖，不删除原测试只为过绿；不增加默认关闭新图的兼容开关。
-- [ ] 写故障红绿：子进程在工具回执后、MySQL finalize后checkpoint前退出；重启继续新问题不重复用户消息/入池/工具/工单，部分正文不恢复为完成。旧会话轮边界覆盖而非追加历史；日志验证节点/route/预算/结束码，无密钥与内部思维链。
-- [ ] 运行本任务与入口相关回归；留痕、记录依赖实际版本/恢复证据，提交 `feat: orchestrate customer chat with persistent LangGraph`。
+- [x] 运行 `& $ProjectPython -m pytest tests/test_workflow_graph.py tests/test_workflow_recovery.py tests/test_workflow_chat.py -q` 确认红；实现 spec 图，graph 节点使用 T1单步/T2分类/T4检索，最终log节点调T3 finalize；compile时注入saver，astream使用custom或custom+updates与 `durability='sync'`，把业务事件映射SSE，不把checkpoint内部数据发前端。
+- [x] 实现 lifespan打开/关闭saver与图资源；构造会话锁不依赖knowledge是否启用，沿用Coordinator同主机数据库作用域。thread_id由规范化数据库身份+cid生成；同一SQLite文件不可意外绑定不同数据库身份，单独绑定元数据防串环境。运行时对象由闭包注入，State只含可序列化数据；超时不依赖跨重启单调时间比较。
+- [x] rebase持锁先核对MySQL终态与checkpoint：未完成旧turn标interrupted，禁止 `ainvoke(None)`/自动续跑。若snapshot.next仍有任务，用公开 `aupdate_state(...,as_node='log')` 写已中断快照并验证next为空，再带新输入启动START；不调用旧log业务函数、不改私有表。MySQL已完成而checkpoint落后时保留完成事实，清除旧pending但不重复finalize；无法安全对账则报可识别错误，不自动重放。
+- [x] 流顺序：meta先出；节点状态/工具状态及上游token过程中发送；graph退出且sync checkpoint成功后，读取已完成turn，再发sources/actions/done。length保留截断提示但无完整答复/动作；checkpoint/log/最终事务失败只error。取消时记终态、关闭生成器，shield仅短写；等待未完成同步任务结束后释放租约。scripts/client.py支持并校验workflow/actions/新sources，旧来源兼容，仍拒绝unknown帧和done后事件。
+- [x] 入口旧测试中的固定两次模型调用/固定帧序列更新为分类+Agent+真实流的契约；首字延迟/断开测试使用business问题，不用已固定回复的“你好”测模型流。网关自身协议故障仍独立覆盖，不删除原测试只为过绿；不增加默认关闭新图的兼容开关。
+- [x] 写故障红绿：子进程在工具回执后、MySQL finalize后checkpoint前退出；重启继续新问题不重复用户消息/入池/工具/工单，部分正文不恢复为完成。旧会话轮边界覆盖而非追加历史；日志验证节点/route/预算/结束码，无密钥与内部思维链。
+- [x] 运行本任务与入口相关回归；留痕、记录依赖实际版本/恢复证据，提交 `feat: orchestrate customer chat with persistent LangGraph`。
 
 ### T6：独立工单动作 API 与旧工具解耦
 

@@ -8,16 +8,24 @@ class WorkflowUpstream:
     def __init__(self, scenario='two', *, final_reason='stop', bad_actions=None):
         self.scenario, self.final_reason, self.bad_actions = scenario, final_reason, bad_actions
         self.requests = []
+        self.intent = '物流'
+        self.answer_chunks=['订单1001：','以下为演示数据。']
         self.app = FastAPI()
         self.app.post('/chat/completions')(self.complete)
+        self.app.post('/v1/chat/completions')(self.complete)
 
     async def complete(self, request: Request):
         body = await request.json()
         self.requests.append(body)
         messages = body['messages']
+        if '[workflow_intent]' in messages[0].get('content',''):
+            return JSONResponse({'id':'intent','object':'chat.completion','model':'test',
+                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'intent':self.intent},ensure_ascii=False)},
+                            'finish_reason':'stop'}],
+                'usage':{'prompt_tokens':50,'completion_tokens':15,'total_tokens':65}})
         if body.get('stream'):
             async def frames():
-                for text in ['订单1001：', '以下为演示数据。']:
+                for text in self.answer_chunks:
                     yield 'data: ' + json.dumps({'id':'wf','object':'chat.completion.chunk','model':'test',
                         'choices':[{'index':0,'delta':{'content':text},'finish_reason':None}]}) + '\n\n'
                 yield 'data: ' + json.dumps({'id':'wf','object':'chat.completion.chunk','model':'test',

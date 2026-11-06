@@ -98,18 +98,19 @@ class ProcessLease:
 
 
 class Coordinator:
-    def __init__(self, root: Path, identity: RuntimeIdentity):
+    def __init__(self, root: Path, identity: RuntimeIdentity, *, bind_knowledge: bool = True):
         self.root = Path(root).resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.identity = identity.normalized()
         database = json.dumps([self.identity['mysql_host'], self.identity['mysql_port'],
                                self.identity['mysql_database']], ensure_ascii=False, separators=(',', ':'))
         self._database_key = sha256(database.encode('utf-8')).hexdigest()
-        with self._hold(self._safe('bindings.lock')):
-            self._bind()
+        if bind_knowledge:
+            with self._hold(self._safe('bindings.lock')):
+                self._bind()
 
     @classmethod
-    def for_settings(cls, settings):
+    def for_settings(cls, settings, *, bind_knowledge: bool = True):
         project = Path(__file__).resolve().parents[1]
         root = (project / 'artifacts' / 'runtime' / 'coordination').resolve()
         if not root.is_relative_to(project):
@@ -117,8 +118,9 @@ class Coordinator:
         knowledge_root = Path(settings.knowledge_data_dir)
         if not knowledge_root.is_absolute():
             knowledge_root = project / knowledge_root
-        return cls(root, RuntimeIdentity(settings.mysql_host, settings.mysql_port, settings.mysql_database,
-                                         settings.milvus_uri, knowledge_root))
+        identity=RuntimeIdentity(settings.mysql_host,settings.mysql_port,settings.mysql_database,settings.milvus_uri,knowledge_root)
+        if bind_knowledge:return cls(root,identity)
+        return cls(root,identity,bind_knowledge=False)
 
     def _safe(self, name: str) -> Path:
         path = self.root / name

@@ -27,12 +27,18 @@ class ControlledToolUpstream:
         async def chat(request: Request):
             body = await request.json()
             self.requests.append((body,dict(request.headers)))
+            workflow='[workflow_agent]' in body['messages'][0].get('content','')
+            if '[workflow_intent]' in body['messages'][0].get('content',''):
+                return {'id':'intent','object':'chat.completion','created':0,'model':'test-model',
+                        'choices':[{'index':0,'message':{'role':'assistant','content':'{"intent":"物流"}'},'finish_reason':'stop'}]}
             if not body.get('stream'):
-                message = {'role':'assistant','content':'' if self.calls else '无需查询。'}
-                if self.calls:
-                    message['tool_calls'] = self.calls
+                current=max(i for i,m in enumerate(body['messages']) if m['role']=='user')
+                receipts=[m for m in body['messages'][current+1:] if m['role']=='tool']
+                calls=[] if workflow and receipts else self.calls
+                message = {'role':'assistant','content':'' if calls else ('{"actions":[]}' if workflow else '无需查询。')}
+                if calls:message['tool_calls'] = calls
                 return {'id':'test-plan','object':'chat.completion','created':0,'model':'test-model',
-                        'choices':[{'index':0,'message':message,'finish_reason':self.selection_reason}]}
+                        'choices':[{'index':0,'message':message,'finish_reason':'stop' if workflow and not calls else self.selection_reason}]}
 
             def event(delta, reason=None):
                 return 'data: '+json.dumps({'id':'test-final','object':'chat.completion.chunk','created':0,

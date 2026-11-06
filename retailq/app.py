@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 import asyncio
+import sqlite3
 
 import anyio
 from fastapi import Depends, FastAPI, Request
@@ -15,7 +16,10 @@ from retailq.api.sources import router as sources_router
 from retailq.api.knowledge_access import require_console_local
 from retailq.db import Database
 from retailq.repositories import ChatRepository
-from retailq.services.chat import ChatService
+from retailq.workflow.service import WorkflowChatService
+from retailq.workflow.runtime import WorkflowRuntime
+from retailq.workflow.repository import WorkflowRepository
+from retailq.coordination import Coordinator
 from retailq.config import Settings
 from retailq.context import prepare_extraction
 from retailq.errors import ServiceError
@@ -40,8 +44,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         raise RuntimeError("应用配置无效，请检查 .env 配置。") from None
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        gateway=database=knowledge=scheduler=service=jobs=rag_gateway=None
+        gateway=database=knowledge=scheduler=service=jobs=workflow_context=None
         application.state.knowledge_failure=None
+        application.state.workflow_failure=None
+        application.state.workflow_repository=None
         try:
             gateway = OpenAIModelGateway(settings) if settings.is_ready else None
             application.state.gateway = gateway
@@ -66,16 +72,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 repository=ChatRepository(database,faq_search=knowledge.search_faq if knowledge else None)
                 repository.rag_required=settings.knowledge_enabled
                 if knowledge is not None:
-                    from retailq.knowledge.rag_gateway import OpenAIRAGGateway
-                    from retailq.knowledge.rag_repository import RAGRepository
-                    from retailq.knowledge.policy import DynamicConfidencePolicy
                     repository.rag_retrieve=knowledge.retrieve
-                    rag_gateway=OpenAIRAGGateway(settings)
-                    service=ChatService(repository,gateway,settings,rag_gateway=rag_gateway,
-                                        rag_repository=RAGRepository(database),confidence_policy=DynamicConfidencePolicy(settings),
-                                        coordinator=knowledge.coordinator)
-                else:
-                    service=ChatService(repository,gateway,settings)
+                from retailq.knowledge.policy import DynamicConfidencePolicy
+                workflow_repository=WorkflowRepository(database)
+                application.state.workflow_repository=workflow_repository
+                workflow_context=WorkflowRuntime.open(settings,workflow_repository,repository,gateway,knowledge,
+                    DynamicConfidencePolicy(settings) if knowledge else None,
+                    knowledge.coordinator if knowledge else Coordinator.for_settings(settings,bind_knowledge=False))
+                try:
+                    runtime=await workflow_context.__aenter__()
+                    service=WorkflowChatService(runtime)
+                except ServiceError as exc:
+                    application.state.workflow_failure=exc
+                    workflow_context=None
+                except (OSError,sqlite3.Error):
+                    application.state.workflow_failure=ServiceError('workflow_checkpoint_unavailable',503,'检查点文件不可用，请检查路径和权限。')
+                    workflow_context=None
             application.state.chat_service = service
             if scheduler is not None:scheduler.start()
             yield
@@ -83,24 +95,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             with anyio.CancelScope(shield=True):
                 try:
                     if service is not None:
-                        with anyio.move_on_after(15,shield=True):await service.aclose()
+                        await service.aclose()
                 finally:
                     try:
-                        if jobs is not None:await jobs.aclose()
+                        if workflow_context is not None:await workflow_context.__aexit__(None,None,None)
                     finally:
                         try:
-                            if scheduler is not None:await scheduler.stop()
+                            if jobs is not None:await jobs.aclose()
                         finally:
                             try:
-                                if knowledge is not None:await asyncio.to_thread(knowledge.close)
+                                if scheduler is not None:await scheduler.stop()
                             finally:
                                 try:
-                                    if database is not None:database.close()
+                                    if knowledge is not None:await asyncio.to_thread(knowledge.close)
                                 finally:
-                                    if gateway is not None:
-                                        with anyio.move_on_after(5,shield=True):await gateway.aclose()
-                                    if rag_gateway is not None:
-                                        with anyio.move_on_after(5,shield=True):await rag_gateway.aclose()
+                                    try:
+                                        if database is not None:database.close()
+                                    finally:
+                                        if gateway is not None:
+                                            with anyio.move_on_after(5,shield=True):await gateway.aclose()
 
     application = FastAPI(title="RetailQ", version="0.3.0", lifespan=lifespan)
     application.state.settings = settings

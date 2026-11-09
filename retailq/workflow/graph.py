@@ -8,7 +8,8 @@ from langgraph.config import get_stream_writer
 from langgraph.graph import StateGraph,START,END
 from retailq.api.source_schemas import CitationRecord
 from retailq.services.chat import ChatEvent
-from retailq.workflow.classification import COMPLAINT_REPLY,SMALLTALK_REPLY,resolve_reference
+from retailq.workflow.classification import COMPLAINT_REPLY,SMALLTALK_REPLY
+from retailq.errors import ServiceError
 from retailq.workflow.contracts import WorkflowState,TurnRef
 from retailq.workflow.evidence import validate_answer_references
 from retailq.workflow.sql import write_sql
@@ -20,16 +21,32 @@ def emit(event):
     get_stream_writer()({'event':event.event,'data':event.data})
 
 
-def build_graph(agent,classifier,evidence,repository,checkpointer):
+def build_graph(agent,classifier,evidence,repository,checkpointer,*,query_steps=None,order_steps=None):
     graph=StateGraph(WorkflowState)
 
-    async def resolve(state): return {'resolved_question':resolve_reference(state['raw_question'])}
+    async def resolve(state):
+        if query_steps is None:raise ServiceError('router_unavailable',503,'分流器尚未就绪。')
+        return await query_steps.resolve(state)
     async def intent(state): return await classifier.classify(state)
     async def route(state): return {}
     async def retrieve(state): return await evidence.retrieve(state)
     async def gate(state): return await evidence.gate(state)
-    async def decide(state): return await agent.decide(state)
+    async def decide(state):
+        patch=await agent.decide(state)
+        if state.get('route')=='core' and state.get('intent')=='退款退货' and patch.get('status')=='answer':
+            patch['actions']=list(dict.fromkeys([*patch.get('actions',[]),'ticket']))
+        return patch
     async def tools(state): return await agent.execute(state)
+    async def resolve_order(state):return await order_steps.resolve_order(state)
+    async def select_order(state):return await order_steps.select_order(state)
+    async def load_order(state):return await order_steps.load_order(state)
+    async def plan_query(state):return await query_steps.plan(state)
+    async def expand_query(state):return await query_steps.expand(state)
+    async def retrieve_policy(state):return await evidence.retrieve_policy(state)
+    async def cancelled(state):
+        turn=TurnRef(state['turn_id'],state['conversation_id'],state['user_message_id'])
+        await write_sql(repository.cancel_pending,turn,state['user_id'],state.get('order_selection',{}).get('interrupt_id'))
+        return {'status':'cancelled'}
     async def answer(state):
         patch=await agent.answer(state)
         if state.get('evidence',{}).get('citations') and patch['status']=='completed':
@@ -70,11 +87,23 @@ def build_graph(agent,classifier,evidence,repository,checkpointer):
 
     for name,fn in [('resolve',resolve),('intent',intent),('route',route),('retrieve',retrieve),('gate',gate),
                     ('agent_decide',decide),('tools',tools),('answer',answer),('complaint',complaint),
-                    ('smalltalk',smalltalk),('fallback',fallback),('log',log)]:
+                    ('smalltalk',smalltalk),('fallback',fallback),('log',log),('resolve_order',resolve_order),
+                    ('select_order',select_order),('load_order',load_order),('plan_query',plan_query),
+                    ('expand_query',expand_query),('retrieve_policy',retrieve_policy),('cancelled',cancelled)]:
         graph.add_node(name,wrapped(name,fn))
     graph.add_edge(START,'resolve');graph.add_edge('resolve','intent');graph.add_edge('intent','route')
     graph.add_conditional_edges('route',lambda s:s['route'],{'knowledge':'retrieve','business':'agent_decide',
-                                                          'complaint':'complaint','smalltalk':'smalltalk'})
+                                                          'complaint':'complaint','smalltalk':'smalltalk',
+                                                          'core':'resolve_order','other':'agent_decide'})
+    graph.add_conditional_edges('resolve_order',lambda s:'load_order' if s.get('order_id') else 'select_order',
+                                {'load_order':'load_order','select_order':'select_order'})
+    graph.add_conditional_edges('select_order',lambda s:'cancelled' if s.get('status')=='cancelled' else 'load_order',
+                                {'cancelled':'cancelled','load_order':'load_order'})
+    graph.add_edge('cancelled',END)
+    graph.add_edge('load_order','plan_query')
+    graph.add_conditional_edges('plan_query',lambda s:'expand_query' if s['query_plan']['core_case'] else 'retrieve_policy',
+                                {'expand_query':'expand_query','retrieve_policy':'retrieve_policy'})
+    graph.add_edge('expand_query','retrieve_policy');graph.add_edge('retrieve_policy','gate')
     graph.add_edge('retrieve','gate')
     graph.add_conditional_edges('gate',lambda s:'agent_decide' if s['gate']['allowed'] else 'fallback',
                                 {'agent_decide':'agent_decide','fallback':'fallback'})

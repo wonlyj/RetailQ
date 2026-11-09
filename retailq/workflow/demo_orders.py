@@ -16,7 +16,7 @@ class DemoOrderProvider:
     def list_orders(self,user_id):
         if not isinstance(user_id,str) or not user_id:
             raise ServiceError('order_identity_missing',422,'请选择有效的本地演示身份。')
-        return tuple({**deepcopy(row),'source':'demo','demo_owner':user_id} for row in _ORDERS)
+        return tuple({**deepcopy(row),'source':'demo','demo_owner':user_id,'is_custom':None} for row in _ORDERS)
 
     def get_order(self,user_id,order_id):
         row=next((r for r in self.list_orders(user_id) if r['order_id']==order_id),None)

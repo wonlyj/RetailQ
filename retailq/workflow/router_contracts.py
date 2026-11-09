@@ -29,7 +29,7 @@ def parse_intent(text):
     value=strict_object(text,'intent_output_invalid')
     if (set(value)!={'intent','confidence'} or value['intent'] not in INTENTS
             or type(value['intent']) is not str or type(value['confidence']) not in (int,float)
-            or not math.isfinite(value['confidence']) or not 0<=value['confidence']<=1):
+            or not 0<=value['confidence']<=1 or not math.isfinite(value['confidence'])):
         raise invalid('intent_output_invalid')
     return IntentResult(value['intent'],float(value['confidence']))
 

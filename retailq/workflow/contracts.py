@@ -51,6 +51,17 @@ class WorkflowState(TypedDict, total=False):
     resolved_question: str
     messages: list
     intent: str
+    confidence: float
+    query_plan: dict
+    queries: list[str]
+    preprocess_calls: dict
+    policy_mode: str | None
+    order_id: str | None
+    order_options: list
+    order_snapshot: dict
+    order_selection: dict | None
+    remaining_active_seconds: float
+    router_version: int
     route: str
     evidence: dict | None
     gate: dict | None

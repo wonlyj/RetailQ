@@ -14,6 +14,9 @@ from retailq.workflow.contracts import TurnRef
 from retailq.workflow.evidence import EvidenceSteps
 from retailq.workflow.graph import build_graph,emit
 from retailq.workflow.sql import write_sql
+from retailq.workflow.query_processing import QuerySteps
+from retailq.workflow.order_steps import OrderSteps
+from retailq.workflow.demo_orders import DemoOrderProvider
 
 
 class WorkflowRuntime:
@@ -68,11 +71,19 @@ class WorkflowRuntime:
         return {'configurable':{'thread_id':self.identity+':'+str(cid)},'recursion_limit':128}
 
     def graph_for(self,turn):
-        turn.evidence=EvidenceSteps(self.chat_repository.rag_retrieve,self.policy,self.settings,deadline=turn.deadline)
+        turn.evidence=EvidenceSteps(self.chat_repository.rag_retrieve,self.policy,self.settings,deadline=turn.deadline,
+                                   policy_retrieve=self.chat_repository.retrieve_policy)
         agent=AgentSteps(self.gateway,turn.registry,self.settings,emit,repository=self.repository,
                          turn=turn.ref,deadline=turn.deadline)
         turn.agent=agent
-        return build_graph(agent,IntentClassifier(self.gateway,self.settings),turn.evidence,self.repository,self.saver)
+        async def observer(value):await write_sql(self.repository.record_router_observation,turn.ref,value)
+        queries=QuerySteps(self.gateway,self.settings,deadline=turn.deadline,observer=observer)
+        orders=OrderSteps(DemoOrderProvider(),turn.registry,self.repository,turn.ref,deadline=turn.deadline,emit=emit)
+        return build_graph(agent,IntentClassifier(self.gateway,self.settings,deadline=turn.deadline,observer=observer),turn.evidence,
+                           self.repository,self.saver,query_steps=queries,order_steps=orders)
+
+    async def snapshot(self,cid):
+        return await build_graph(None,None,None,None,self.saver).aget_state(self.config_for(cid))
 
     async def rebase(self,turn,projection):
         # graph is request-local but its fixed topology/thread identity is stable.
@@ -91,4 +102,6 @@ class WorkflowRuntime:
             'conversation_id':turn.ref.conversation_id,'user_id':turn.user_id,'raw_question':turn.raw_question,
             'resolved_question':turn.raw_question,'messages':turn.prepared.messages,'intent':'','route':'',
             'evidence':{},'gate':None,'agent':{},'answer':'','finish_reason':None,'actions':[],
-            'final_message_id':None,'trace':[],'status':'active'}
+            'final_message_id':None,'trace':[],'status':'active','router_version':6,'confidence':0,
+            'preprocess_calls':{},'query_plan':{},'queries':[],'policy_mode':None,'order_id':None,
+            'order_options':[],'order_snapshot':{},'order_selection':None,'remaining_active_seconds':self.settings.workflow_turn_timeout_seconds}

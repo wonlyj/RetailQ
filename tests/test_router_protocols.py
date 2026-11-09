@@ -13,7 +13,7 @@ def test_intent_has_confidence_and_other():
     assert result.intent == '其他' and result.confidence == .2
 
 
-@pytest.mark.parametrize('value', ['true', 'NaN', 'Infinity', '-0.1', '1.1', '"0.5"'])
+@pytest.mark.parametrize('value', ['true', 'NaN', 'Infinity', '-0.1', '1.1', '"0.5"', '9'*400])
 def test_confidence_rejects_non_finite_or_non_numeric(value):
     from retailq.workflow.classification import parse_intent
     with pytest.raises(ServiceError):
@@ -89,3 +89,17 @@ async def test_complete_explicit_order_question_cannot_be_stylistically_rewritte
     raw='还是查询订单1002的运输进度'
     patch=await QuerySteps(Gateway(),Settings(_env_file=None)).resolve({'raw_question':raw,'messages':[HumanMessage(content=raw)]})
     assert patch['resolved_question']==raw
+
+
+@pytest.mark.anyio
+async def test_no_tool_control_decision_forces_json():
+    from retailq.gateway import OpenAIModelGateway
+    gateway=OpenAIModelGateway(Settings(_env_file=None,openai_api_key='test',openai_model='test'))
+    bound=AsyncMock();bound.ainvoke.return_value=AIMessage(content='{"actions":[]}',response_metadata={'finish_reason':'stop'})
+    from unittest.mock import Mock
+    model=Mock();model.bind.return_value=bound;model.ainvoke=AsyncMock(return_value=bound.ainvoke.return_value)
+    gateway.model=model
+    try:
+        assert (await gateway.decide_agent([HumanMessage(content='JSON控制决策')],[],max_tokens=128)).actions==()
+        model.bind.assert_called_once_with(response_format={'type':'json_object'})
+    finally:await gateway.aclose()

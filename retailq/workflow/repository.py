@@ -20,9 +20,13 @@ def digest(value):
     return sha256(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')).hexdigest()
 
 
-def action_view(action):
-    return {'action_id':action.action_id,'kind':action.kind,'status':action.status,
+def action_view(action,binding=None):
+    result={'action_id':action.action_id,'kind':action.kind,'status':action.status,
             'origin_assistant_message_id':str(action.origin_assistant_message_id),'result':action.result}
+    if binding:
+        from retailq.workflow.refunds import REFUND_REASONS
+        result.update(subtype='refund',order_id=binding['order_id'],reason_options=list(REFUND_REASONS))
+    return result
 
 
 class WorkflowRepository:
@@ -188,11 +192,16 @@ class WorkflowRepository:
             message=Message(conversation_id=turn.conversation_id,role='tool',content=content,tool_call_id=call_id)
             session.add(message);session.flush();return message.id
 
-    def _create_actions(self,session,row,message_id,actions):
+    def _create_actions(self,session,row,message_id,actions,state=None):
+        bindings={}
         for kind in actions:
             identity=uuid4().hex
             session.add(WorkflowAction(action_id=identity,turn_id=row.turn_id,origin_assistant_message_id=message_id,
                                        kind=kind,tool_call_id='wa_'+identity))
+            if (state and kind=='ticket' and state.get('route')=='core' and state.get('intent')=='退款退货'
+                    and state.get('order_id') and (state.get('gate') or {}).get('allowed') is True):
+                bindings[identity]={'subtype':'refund','order_id':state['order_id'],'source_turn':row.turn_id}
+        if bindings:row.payload={**row.payload,'ticket_bindings':bindings}
         session.flush()
 
     @database_errors
@@ -223,7 +232,7 @@ class WorkflowRepository:
                     pool=LowConfidenceQuestion(conversation_id=turn.conversation_id,raw_question=user.content,
                                                source='retrieval_low_conf',reason=gate.get('reason') or '检索证据不足')
                     session.add(pool);session.flush();pool_id=pool.id
-                self._create_actions(session,row,message_id,actions)
+                self._create_actions(session,row,message_id,actions,state)
                 row.final_message_id=message_id;row.status=final['status']
                 row.payload={**row.payload,'final_hash':final_hash,'final':final,'low_confidence_question_id':pool_id,
                              'usage':state.get('agent',{}).get('usage'), 'trace':state.get('trace',[]),
@@ -231,7 +240,7 @@ class WorkflowRepository:
                 row.payload={**row.payload,'router_audit':{k:state.get(k) for k in ('resolved_question','confidence','query_plan','queries','order_id','order_snapshot','policy_mode','preprocess_calls')}}
             saved=session.scalars(select(WorkflowAction).where(WorkflowAction.turn_id==row.turn_id).order_by(WorkflowAction.created_at,WorkflowAction.action_id)).all()
             return FinalizedTurn(row.turn_id,message_id,'wf_'+row.turn_id if final['evidence'] else None,
-                                 tuple(action_view(a) for a in saved))
+                                 tuple(action_view(a,row.payload.get('ticket_bindings',{}).get(a.action_id)) for a in saved))
 
     @database_errors
     def mark_terminal(self,turn,status,code=None):
@@ -259,7 +268,7 @@ class WorkflowRepository:
                 raise ServiceError('workflow_message_not_found',404,'回复不存在。')
             actions=session.scalars(select(WorkflowAction).join(WorkflowTurn).where(
                 WorkflowTurn.conversation_id==cid,WorkflowAction.origin_assistant_message_id==message_id)).all()
-            return tuple(action_view(a) for a in actions)
+            return tuple(action_view(a,session.get(WorkflowTurn,a.turn_id).payload.get('ticket_bindings',{}).get(a.action_id)) for a in actions)
 
     @database_errors
     def load_citations(self,cid,user_id,evidence_id):
@@ -293,10 +302,28 @@ class WorkflowRepository:
             return TicketActionResult(row.action_id,row.status,row.result)
 
     @database_errors
-    def claim_action(self,cid,user_id,action_id,description,ticket_type):
-        request_hash=digest({'description':description,'ticket_type':ticket_type})
+    def action_binding(self,cid,user_id,action_id):
+        with self.database.sessions() as session:
+            row=self._action(session,cid,user_id,action_id)
+            return session.get(WorkflowTurn,row.turn_id).payload.get('ticket_bindings',{}).get(action_id)
+
+    @database_errors
+    def claim_action(self,cid,user_id,action_id,description,ticket_type,*,refund=None):
+        request_hash=digest({'description':description,'ticket_type':ticket_type,**({'refund':refund} if refund else {})})
         with self.database.sessions.begin() as session:
             row=self._action(session,cid,user_id,action_id,lock=True)
+            binding=session.get(WorkflowTurn,row.turn_id).payload.get('ticket_bindings',{}).get(action_id)
+            if binding:
+                from retailq.workflow.refunds import RefundRequest,refund_description
+                if refund is None:raise ServiceError('refund_reason_required',409,'请从退款表单选择固定原因后提交。')
+                validated=RefundRequest(user_id=user_id,reason=refund.get('reason'),request_key=refund.get('request_key'))
+                if (refund.get('order_id')!=binding['order_id'] or ticket_type!='退款'
+                        or description!=refund_description(binding['order_id'],validated.reason)):
+                    raise ServiceError('refund_binding_conflict',409,'退款申请与绑定订单不一致。')
+                from sqlalchemy import inspect
+                column=next(c for c in inspect(session.connection()).get_columns('tickets') if c['name']=='ticket_type')
+                if '退款' not in getattr(column['type'],'enums',()):raise ServiceError('router_schema_missing',503,'请先执行第六章显式退款枚举迁移。')
+            elif ticket_type=='退款' or refund is not None:raise ServiceError('refund_action_required',409,'退款必须使用本单回复下的申请入口。')
             if row.request_hash is not None and row.request_hash!=request_hash:
                 raise ServiceError('workflow_action_conflict',409,'该动作已确认其他内容，请先核查原工单。')
             is_new=row.status=='offered'

@@ -15,12 +15,12 @@ from retailq.workflow.sql import write_sql
 
 READ_TOOLS = frozenset(('query_order', 'query_product', 'query_logistics'))
 LIMIT_ANSWER = '本轮查询已达到步骤或预算上限，请补充信息或分开提问；已完成的查询记录会保留。'
-DECISION_STAGE = '[workflow_decision] 当前请求仅为控制决策阶段，不是最终答复阶段。若无需调用工具，只输出单个JSON对象，例如 {"actions":[]}。禁止在JSON前后输出任何自然语言、追问或解释；下一次独立请求才生成用户可见的答复。'
+DECISION_STAGE = '[workflow_decision] 当前请求仅为控制决策阶段，不是最终答复阶段。每次最多申请一个工具、查询一个订单。即使用户要求查多单，也必须先查一单、等待真实回执，再在下一次决策查另一单；禁止一次输出多个tool_calls。若无需调用工具，只输出单个JSON对象，例如 {"actions":[]}。禁止在JSON前后输出任何自然语言、追问或解释；下一次独立请求才生成用户可见的答复。'
 
 
-def answer_instruction(actions=(),knowledge=False):
+def answer_instruction(actions=(),knowledge=False,refund=False):
     instruction='现在根据用户问题、证据和工具结果直接给出最终答复；不要输出动作JSON或工具申请。'
-    labels=[{'handoff':'转人工','ticket':'建工单'}[kind] for kind in actions]
+    labels=[{'handoff':'转人工','ticket':'申请退款' if refund else '建工单'}[kind] for kind in actions]
     instruction+='本轮实际可用按钮：'+json.dumps(labels,ensure_ascii=False,separators=(',',':'))+'。只能提及本轮实际存在的中文按钮名，不输出内部动作标识；空列表时不得说下方有按钮。'
     instruction+='缺少业务ID时只追问现有工具对应的ID，物流只支持订单号，不要求快递单号，不索要昵称或手机号，不建议本系统不具备的查询方式。'
     if actions:instruction+='动作只由用户点击回复下方的独立按钮并确认执行；请说明点击按钮，不要求回复数字或文字触发动作。'
@@ -69,17 +69,18 @@ class AgentSteps:
         if agent['step'] >= self.settings.workflow_max_tool_steps:
             return self.limited(state)
         decision_state={**state,'messages':[*state['messages'],SystemMessage(content=DECISION_STAGE)]}
-        try: agent, ledger, reservation, cap = self._reserve(decision_state, tools=True, stage='agent_decision')
+        restricted=state.get('route') in ('core','other')
+        try: agent, ledger, reservation, cap = self._reserve(decision_state, tools=not restricted, stage='agent_decision')
         except BudgetExceeded: return self.limited(state)
         async with asyncio.timeout(max(0,self.deadline-time.monotonic())):
-            decision = await self.gateway.decide_agent(decision_state['messages'],self.tools,max_tokens=cap)
+            decision = await self.gateway.decide_agent(decision_state['messages'],[] if restricted else self.tools,max_tokens=cap)
         ledger.settle(reservation, decision.charge)
         agent['usage'] = ledger.snapshot()
         calls = decision.selection.tool_calls
         if len(calls) > 1: raise ServiceError('multiple_tool_calls',502,'单步只能执行一个工具，本轮未执行工具。')
         if calls:
             call = calls[0]
-            if call['name'] not in READ_TOOLS:
+            if restricted or call['name'] not in READ_TOOLS:
                 raise ServiceError('agent_tool_denied',502,'该工具不能由客服 Agent 自动执行。')
             if call['id'] in agent['call_ids']:
                 raise ServiceError('reused_tool_call_id',502,'模型重复使用工具申请，未执行。')
@@ -98,7 +99,7 @@ class AgentSteps:
         agent = self._agent(state)
         selection = AIMessage.model_validate(agent['pending_selection'])
         call = selection.tool_calls[0]
-        if call['name'] not in READ_TOOLS: raise ServiceError('agent_tool_denied',502,'禁止自动执行该工具。')
+        if state.get('route') in ('core','other') or call['name'] not in READ_TOOLS: raise ServiceError('agent_tool_denied',502,'禁止自动执行该工具。')
         if self.repository is not None:
             await write_sql(self.repository.record_tool_request,self.turn,selection)
         self.registry.context.tool_call_id = call['id']
@@ -120,7 +121,9 @@ class AgentSteps:
 
     async def answer(self, state):
         # The control JSON never becomes assistant prose or model history.
-        instruction=answer_instruction(state.get('actions',[]),bool(state.get('evidence',{}).get('citations')))
+        instruction=answer_instruction(state.get('actions',[]),bool(state.get('evidence',{}).get('citations')),state.get('route')=='core' and state.get('intent')=='退款退货')
+        if state.get('route')=='core':instruction+='订单和政策已由流程确认，只判断本单条件；未知商品状态或缺材料应条件化说明或必要澄清。商品名称不能证明非定制或包装完好；是否定制、是否影响二次销售等未知字段必须保留条件，不可默认满足。不要追问订单号、退款原因，不把未知字段当事实，不承诺已退款。'
+        if state.get('route')=='other':instruction+='当前诉求不明确或超出购物客服范围，只作简短澄清或范围说明，不声称已查询业务。'
         final_messages = [*state['messages'],SystemMessage(content=instruction)]
         working = {**state,'messages':final_messages}
         try: agent, ledger, reservation, cap = self._reserve(working,tools=False,stage='agent_answer')

@@ -100,7 +100,8 @@ class OpenAIModelGateway:
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 options = {'max_tokens':max_tokens} if max_tokens is not None else {}
-                model=self.model.bind_tools(tools,tool_choice='auto',parallel_tool_calls=False) if tools else self.model
+                model=(self.model.bind_tools(tools,tool_choice='auto',parallel_tool_calls=False) if tools
+                       else self.model.bind(response_format={'type':'json_object'}))
                 response = await model.ainvoke(messages,**options)
             reason = response.response_metadata.get('finish_reason')
             if response.invalid_tool_calls or not isinstance(response.content,str):

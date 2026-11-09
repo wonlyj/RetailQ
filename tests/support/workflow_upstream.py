@@ -11,6 +11,8 @@ class WorkflowUpstream:
         self.intent = '物流'
         self.answer_chunks=['订单1001：','以下为演示数据。']
         self.require_decision_stage=False
+        self.resolved=None
+        self.core_case=True
         self.app = FastAPI()
         self.app.post('/chat/completions')(self.complete)
         self.app.post('/v1/chat/completions')(self.complete)
@@ -19,9 +21,15 @@ class WorkflowUpstream:
         body = await request.json()
         self.requests.append(body)
         messages = body['messages']
-        if '[workflow_intent]' in messages[0].get('content',''):
+        marker=messages[0].get('content','')
+        if any(x in marker for x in ('[workflow_resolve]','[workflow_query_plan]','[workflow_expand]','[workflow_intent]')):
+            if '[workflow_resolve]' in marker:
+                value={'resolved_question':self.resolved or next(m['content'] for m in reversed(messages) if m['role']=='user')}
+            elif '[workflow_query_plan]' in marker: value={'core_case':self.core_case}
+            elif '[workflow_expand]' in marker: value={'queries':['商品退货期限和适用条件','商品退货例外及申请材料']}
+            else:value={'intent':self.intent,'confidence':0.95}
             return JSONResponse({'id':'intent','object':'chat.completion','model':'test',
-                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'intent':self.intent},ensure_ascii=False)},
+                'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps(value,ensure_ascii=False)},
                             'finish_reason':'stop'}],
                 'usage':{'prompt_tokens':50,'completion_tokens':15,'total_tokens':65}})
         if body.get('stream'):

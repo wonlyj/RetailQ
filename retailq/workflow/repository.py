@@ -29,6 +29,66 @@ class WorkflowRepository:
     def __init__(self,database): self.database = database
 
     @database_errors
+    def record_router_observation(self,turn,observation):
+        with self.database.sessions.begin() as session:
+            row=self._turn(session,turn,None)
+            calls={**row.payload.get('router_calls',{})}
+            key=observation['call_id'];prior=calls.get(key,{})
+            if prior and prior['stage']!=observation['stage']:raise ValueError('router call identity conflict')
+            if observation['phase']=='raw' and 'raw_content' in prior and prior['raw_content']!=observation['raw_content']:
+                raise ValueError('router raw conflict')
+            calls[key]={**prior,**observation}
+            row.payload={**row.payload,'router_calls':calls}
+
+    @database_errors
+    def load_tool_outcome(self,turn,call_id):
+        with self.database.sessions() as session:
+            self._turn(session,turn,None)
+            message=session.scalar(select(Message).where(Message.conversation_id==turn.conversation_id,
+                Message.role=='tool',Message.tool_call_id.collate('utf8mb4_0900_bin')==call_id))
+            return json.loads(message.content) if message else None
+
+    @database_errors
+    def latest_turn(self,cid,user_id):
+        with self.database.sessions() as session:
+            ChatRepository._owned(session,cid,user_id)
+            row=session.scalar(select(WorkflowTurn).where(WorkflowTurn.conversation_id==cid).order_by(WorkflowTurn.created_at.desc(),WorkflowTurn.user_message_id.desc()).limit(1))
+            return {'turn_id':row.turn_id,'user_message_id':row.user_message_id,'status':row.status,'payload':row.payload} if row else None
+
+    @database_errors
+    def save_pending(self,turn,user_id,pending,remaining_seconds):
+        with self.database.sessions.begin() as session:
+            row=self._turn(session,turn,user_id)
+            if row.final_message_id is not None or row.status not in ('active','waiting_order'):raise ServiceError('workflow_resume_conflict',409,'该轮无法继续选择订单。')
+            prior=row.payload.get('pending',{})
+            if prior.get('interrupt_id')==pending['interrupt_id']:
+                remaining_seconds=min(remaining_seconds,row.payload.get('remaining_active_seconds',remaining_seconds))
+            row.status='waiting_order';row.payload={**row.payload,'pending':pending,'remaining_active_seconds':remaining_seconds}
+
+    @database_errors
+    def cancel_pending(self,turn,user_id,interrupt_id):
+        with self.database.sessions.begin() as session:
+            row=self._turn(session,turn,user_id)
+            if row.status=='cancelled':return
+            if row.payload.get('pending',{}).get('interrupt_id')!=interrupt_id:raise ServiceError('workflow_resume_conflict',409,'该订单选择已过期。')
+            row.status='cancelled';row.payload={**row.payload,'cancelled':True}
+
+    @database_errors
+    def claim_resume(self,turn,user_id,interrupt_id,request_key,selection):
+        with self.database.sessions.begin() as session:
+            row=self._turn(session,turn,user_id)
+            claim={'interrupt_id':interrupt_id,'request_key':request_key,'selection':selection}
+            prior=row.payload.get('resume_claim')
+            if prior is not None and prior!=claim:raise ServiceError('workflow_resume_conflict',409,'该选择请求已提交其他内容，请核查原结果。')
+            if row.status in ('completed','limited','cancelled'):
+                if prior!=claim:raise ServiceError('workflow_resume_conflict',409,'该订单选择已经结束。')
+                return {'is_new':False,'completed':True}
+            if row.status not in ('active','waiting_order') or row.payload.get('pending',{}).get('interrupt_id')!=interrupt_id:
+                raise ServiceError('workflow_resume_conflict',409,'该订单选择已过期。')
+            row.status='active';row.payload={**row.payload,'resume_claim':claim}
+            return {'is_new':prior is None,'completed':False}
+
+    @database_errors
     def start_turn(self,body):
         with self.database.sessions.begin() as session:
             cid = body.conversation_id
@@ -57,7 +117,8 @@ class WorkflowRepository:
             if row is None: raise ServiceError('workflow_turn_not_found',404,'工作流轮次不存在。')
             ChatRepository._owned(session,row.conversation_id,user_id)
             return {'turn_id':row.turn_id,'conversation_id':row.conversation_id,'user_message_id':row.user_message_id,
-                    'final_message_id':row.final_message_id,'status':row.status,'payload':row.payload}
+                    'final_message_id':row.final_message_id,'status':row.status,'payload':row.payload,
+                    'raw_question':session.get(Message,row.user_message_id).content}
 
     @database_errors
     def load_projection(self,cid,user_id,*,before_message_id=None):
@@ -167,6 +228,7 @@ class WorkflowRepository:
                 row.payload={**row.payload,'final_hash':final_hash,'final':final,'low_confidence_question_id':pool_id,
                              'usage':state.get('agent',{}).get('usage'), 'trace':state.get('trace',[]),
                              'intent':state.get('intent'),'route':state.get('route')}
+                row.payload={**row.payload,'router_audit':{k:state.get(k) for k in ('resolved_question','confidence','query_plan','queries','order_id','order_snapshot','policy_mode','preprocess_calls')}}
             saved=session.scalars(select(WorkflowAction).where(WorkflowAction.turn_id==row.turn_id).order_by(WorkflowAction.created_at,WorkflowAction.action_id)).all()
             return FinalizedTurn(row.turn_id,message_id,'wf_'+row.turn_id if final['evidence'] else None,
                                  tuple(action_view(a) for a in saved))

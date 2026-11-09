@@ -3,7 +3,8 @@ import json
 import warnings
 from collections.abc import AsyncIterator
 from contextlib import aclosing
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict, is_dataclass
+from uuid import uuid4
 from typing import Protocol
 
 import httpx
@@ -29,6 +30,10 @@ class ModelChunk:
 
 
 class ModelGateway(Protocol):
+    async def resolve_query(self,messages,*,max_tokens,observer=None,call_id=None): ...
+    async def classify_intent(self,messages,*,max_tokens,observer=None,call_id=None): ...
+    async def plan_query(self,messages,*,max_tokens,observer=None,call_id=None): ...
+    async def expand_query(self,messages,*,max_tokens,observer=None,call_id=None): ...
     async def select_tool(self, messages: list[BaseMessage], tools: list[BaseTool]) -> AIMessage: ...
     def stream(self, messages: list[BaseMessage]) -> AsyncIterator[ModelChunk]: ...
     async def extract(self, messages: list[BaseMessage]) -> AfterSalesResult: ...
@@ -95,7 +100,8 @@ class OpenAIModelGateway:
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 options = {'max_tokens':max_tokens} if max_tokens is not None else {}
-                response = await self.model.bind_tools(tools, tool_choice='auto', parallel_tool_calls=False).ainvoke(messages,**options)
+                model=self.model.bind_tools(tools,tool_choice='auto',parallel_tool_calls=False) if tools else self.model
+                response = await model.ainvoke(messages,**options)
             reason = response.response_metadata.get('finish_reason')
             if response.invalid_tool_calls or not isinstance(response.content,str):
                 raise unsupported()
@@ -125,18 +131,42 @@ class OpenAIModelGateway:
     def stream_answer(self, messages, *, max_tokens: int):
         return self.stream(messages,max_tokens=max_tokens)
 
-    async def classify_intent(self,messages,*,max_tokens: int):
-        from retailq.workflow.classification import parse_intent
+    async def _router_json(self,stage,parser,messages,*,max_tokens,observer=None,call_id=None):
+        call_id=call_id or uuid4().hex
+        async def observe(phase,**fields):
+            if observer is not None: await observer({'stage':stage,'call_id':call_id,'phase':phase,**fields})
+        response=None
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
-                response = await self.model.ainvoke(messages,max_tokens=max_tokens,temperature=0)
+                response = await self.model.bind(response_format={'type':'json_object'}).ainvoke(messages,max_tokens=max_tokens,temperature=0)
+            await observe('raw',raw_content=response.content,finish_reason=response.response_metadata.get('finish_reason'),
+                          tool_calls=response.tool_calls or response.additional_kwargs.get('tool_calls',[]),usage=response.usage_metadata)
             if (response.tool_calls or response.invalid_tool_calls or response.additional_kwargs.get('tool_calls')
                     or response.response_metadata.get('finish_reason') != 'stop' or not isinstance(response.content,str)):
-                raise ServiceError('intent_output_invalid',502,'模型意图输出不完整或包含工具申请。')
+                raise ServiceError(stage+'_output_invalid',502,'模型分流输出不完整或包含工具申请。')
             require_plain_model_text(response.content)
-            return parse_intent(response.content),usage_charge(response.usage_metadata)
+            value=parser(response.content)
+            await observe('parsed',value=asdict(value) if is_dataclass(value) else value)
+            return value,usage_charge(response.usage_metadata)
         except Exception as exc:
+            await observe('invalid' if response is not None else 'transport_error',error_code=public_error(exc).code)
             raise public_error(exc) from None
+
+    async def classify_intent(self,messages,*,max_tokens,observer=None,call_id=None):
+        from retailq.workflow.router_contracts import parse_intent
+        return await self._router_json('intent',parse_intent,messages,max_tokens=max_tokens,observer=observer,call_id=call_id)
+
+    async def resolve_query(self,messages,*,max_tokens,observer=None,call_id=None):
+        from retailq.workflow.router_contracts import parse_resolution
+        return await self._router_json('resolve',parse_resolution,messages,max_tokens=max_tokens,observer=observer,call_id=call_id)
+
+    async def plan_query(self,messages,*,max_tokens,observer=None,call_id=None):
+        from retailq.workflow.router_contracts import parse_query_plan
+        return await self._router_json('plan',parse_query_plan,messages,max_tokens=max_tokens,observer=observer,call_id=call_id)
+
+    async def expand_query(self,messages,*,max_tokens,observer=None,call_id=None):
+        from retailq.workflow.router_contracts import parse_queries
+        return await self._router_json('expand',parse_queries,messages,max_tokens=max_tokens,observer=observer,call_id=call_id)
 
     async def stream(self, messages: list[BaseMessage], *, max_tokens: int | None = None) -> AsyncIterator[ModelChunk]:
         seen_text = False

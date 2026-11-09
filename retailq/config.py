@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     workflow_turn_timeout_seconds: float = Field(default=120, gt=0, le=600)
     workflow_max_total_tokens: int = Field(default=65536, gt=0)
     workflow_checkpoint_path: str = 'artifacts/workflow/checkpoints.sqlite'
+    workflow_policy_single_confidence_path: str = 'artifacts/knowledge/ch06-policy-single.json'
+    workflow_policy_multi_confidence_path: str = 'artifacts/knowledge/ch06-policy-multi.json'
     knowledge_tokenizer_path: str = 'artifacts/knowledge/assets/tokenizer.json'
     embedding_base_url: str = 'https://api.siliconflow.cn/v1'
     embedding_api_key: SecretStr = Field(default=SecretStr(''),repr=False)

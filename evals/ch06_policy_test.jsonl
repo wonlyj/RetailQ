@@ -1,0 +1,16 @@
+{"id": "test-policy_single-01", "mode": "policy_single", "question": "签收后如何判断商品是否符合退货要求", "expected_allowed": true}
+{"id": "test-policy_single-02", "mode": "policy_single", "question": "退回商品缺少配件是否影响退货", "expected_allowed": true}
+{"id": "test-policy_single-03", "mode": "policy_single", "question": "订单001001申请无理由退货的时限要求", "expected_allowed": true}
+{"id": "test-policy_single-04", "mode": "policy_single", "question": "订单1002拆封使用后退货有哪些限制", "expected_allowed": true}
+{"id": "test-policy_single-05", "mode": "policy_single", "question": "订单1001海运集装箱滞箱费怎么退", "expected_allowed": false}
+{"id": "test-policy_single-06", "mode": "policy_single", "question": "移民签证撤回申请的退款规定", "expected_allowed": false}
+{"id": "test-policy_single-07", "mode": "policy_single", "question": "企业并购保证金退回的仲裁条件", "expected_allowed": false}
+{"id": "test-policy_single-08", "mode": "policy_single", "question": "专利申请撤回后退还官费的标准", "expected_allowed": false}
+{"id": "test-policy_multi-01", "mode": "policy_multi", "question": "签收后如何判断商品是否符合退货要求", "expected_allowed": true}
+{"id": "test-policy_multi-02", "mode": "policy_multi", "question": "退回商品缺少配件是否影响退货", "expected_allowed": true}
+{"id": "test-policy_multi-03", "mode": "policy_multi", "question": "订单001001申请无理由退货的时限要求", "expected_allowed": true}
+{"id": "test-policy_multi-04", "mode": "policy_multi", "question": "订单1002拆封使用后退货有哪些限制", "expected_allowed": true}
+{"id": "test-policy_multi-05", "mode": "policy_multi", "question": "订单1001海运集装箱滞箱费怎么退", "expected_allowed": false}
+{"id": "test-policy_multi-06", "mode": "policy_multi", "question": "移民签证撤回申请的退款规定", "expected_allowed": false}
+{"id": "test-policy_multi-07", "mode": "policy_multi", "question": "企业并购保证金退回的仲裁条件", "expected_allowed": false}
+{"id": "test-policy_multi-08", "mode": "policy_multi", "question": "专利申请撤回后退还官费的标准", "expected_allowed": false}

@@ -200,6 +200,26 @@ class KnowledgeRuntime:
                     if reranker is not None:reranker.close()
         finally:self._read_slots.release()
 
+    def retrieve_policy(self,question,*,queries,mode,deadline):
+        import time
+        from retailq.knowledge.retrieval import RetrievalEngine
+        from retailq.knowledge.rerank import Reranker
+        from retailq.knowledge.policy_retrieval import PolicyRetriever
+        if not self._read_slots.acquire(blocking=False):raise ServiceError('knowledge_busy',503,'政策查询繁忙。')
+        try:
+            with self._operation():
+                deadline=min(deadline,time.monotonic()+self.settings.knowledge_query_timeout_seconds)
+                if time.monotonic()>=deadline:raise ServiceError('knowledge_query_timeout',504,'政策查询已超时。')
+                snapshot=self.corpus.active()
+                reranker=Reranker(self.settings.rerank_base_url,self.settings.effective_rerank_key,
+                    proxy=self.settings.rerank_proxy.get_secret_value(),timeout_seconds=self.settings.rerank_timeout_seconds)
+                try:
+                    with self.vectors.open(snapshot.collection) as store:
+                        engine=RetrievalEngine(self.service.repository,self.embedding,store,None)
+                        return PolicyRetriever(engine,reranker).retrieve(question,tuple(queries),snapshot,mode,deadline=deadline)
+                finally:reranker.close()
+        finally:self._read_slots.release()
+
     def _reserve(self, operation_id=None, run_id=None, *, seal=False):
         with self._condition:
             if self._closing or (self._review_closing and not seal):

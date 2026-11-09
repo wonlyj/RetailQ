@@ -1,4 +1,5 @@
 import { renderActions, validateActions, restoredActions, WorkflowFrames } from './actions.js';
+import { renderOrderSelector, validateSelector } from './order-selector.js';
   "use strict";
   const $ = (id) => document.getElementById(id);
   const storageKey = "retailq.chat.v1";
@@ -128,6 +129,7 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
         persist();
         render();
         closeNav();
+        void refreshPending(session);
       });
       $("sessionList").append(button);
     }
@@ -302,7 +304,7 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
       label.textContent = (message.toolTrace || []).some((t) => t.status === 'running') ? '正在查询，请稍候' : "正在整理回复";
       typing.append(label);
       body.replaceChildren(typing);
-    } else body.textContent = message.role === "assistant" ? "本次未收到完整回复。" : "";
+    } else body.textContent = message.status === 'waiting_order' ? '请选择一笔订单，选定后将继续本次咨询。' : message.role === "assistant" ? "本次未收到完整回复。" : "";
     tools.replaceChildren();
     if (elements.actions) renderActions(elements.actions, message, {
       userId, isBusy: () => busy,
@@ -326,6 +328,12 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
         for (const text of lines) target.messages.push({ id: uid(), turnId: uid(), role: 'assistant', text,
           status: 'complete', simulated: true, createdAt: new Date().toISOString(), toolTrace: [] });
       },
+    });
+    if (elements.actions && message.orderSelector) renderOrderSelector(elements.actions, message.orderSelector, {
+      isBusy: () => busy,
+      select: orderId => void resumeOrder(elements.session, message, {order_id: orderId}),
+      cancel: () => void resumeOrder(elements.session, message, {cancel: true}),
+      check: () => void refreshPending(elements.session, true),
     });
     if (message.role !== "assistant" || message.status === "pending") return;
     if (message.status === 'complete' && message.text) {
@@ -388,7 +396,8 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
     }
   }
   function syncControls() {
-    $("sendButton").disabled = !busy && !$("messageInput").value.trim();
+    $("sendButton").disabled = !busy && (!$("messageInput").value.trim() || Boolean(current()?.pendingOrder));
+    $("messageInput").placeholder = current()?.pendingOrder ? '请先选择订单，或取消后继续咨询' : '描述您的购物问题';
     $("sendButton").classList.toggle("stopping", busy);
     $("sendButton").type = busy ? "button" : "submit";
     $("sendLabel").textContent = busy ? "停止回复" : "发送";
@@ -423,18 +432,20 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
     } catch { serviceState(false, "暂时无法连接"); }
     finally { clearTimeout(timer); }
   }
-  async function send(text) {
-    if (busy || !text.trim()) return;
+  async function send(text, resume = null) {
+    if (busy || (!resume && !text.trim())) return;
     text = text.trim();
     if (text.length > 8000) { notify("单条消息请控制在8000字以内。"); return; }
     const session = current();
+    if (!resume && session.pendingOrder) { notify('请先选择订单或取消本次选择。'); return; }
     const history = historyFor(session);
     const turnId = uid();
     const createdAt = new Date().toISOString();
     const user = { id: uid(), turnId, role: "user", text, status: "complete", createdAt };
-    const assistant = { id: uid(), turnId, role: "assistant", text: "", status: "pending", createdAt, toolTrace: [] };
+    const assistant = resume ? resume.message : { id: uid(), turnId, role: "assistant", text: "", status: "pending", createdAt, toolTrace: [] };
     if (!session.messages.length) session.title = Array.from(text).slice(0, 20).join("");
-    session.messages.push(user, assistant);
+    if (!resume) session.messages.push(user, assistant);
+    else { assistant.status = 'pending'; assistant.text = ''; assistant.citations = []; assistant.actions = []; assistant.orderSelector = null; }
     session.messages = session.messages.slice(-200);
     busy = true;
     controller = new AbortController();
@@ -444,7 +455,7 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
     $("messageInput").style.overflowY = "hidden";
     persist();
     render();
-    const article = $("messages").lastElementChild;
+    const article = $("messages").children[session.messages.indexOf(assistant)];
     const elements = { article, body: article.querySelector(".message-body"), tools: article.querySelector(".message-tools"),
       trace: article.querySelector('.tool-trace'), actions: article.querySelector('.workflow-actions'), session };
     let reader;
@@ -452,9 +463,10 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
     const workflowFrames = new WorkflowFrames();
     let inputRejected = false;
     try {
-      const response = await fetch("/api/chat/stream", {
+      const response = await fetch(resume ? `/api/conversations/${session.conversationId}/turns/${resume.selector.turn_id}/resume` : "/api/chat/stream", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history: session.conversationId ? [] : history, user_id: userId,
+        body: JSON.stringify(resume ? {user_id: userId, interrupt_id: resume.selector.interrupt_id,
+          request_key: resume.selector.request_key, ...resume.selection} : { message: text, history: session.conversationId ? [] : history, user_id: userId,
           ...(session.conversationId ? {conversation_id: session.conversationId} : {}) }), signal: requestController.signal,
       });
       if (!response.ok) {
@@ -489,11 +501,24 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
             scrollToBottom();
           } else if (event === 'meta') {
             if (!Number.isSafeInteger(payload.conversation_id) || payload.conversation_id <= 0) throw new Error('会话标识异常，请新建对话。');
+            if ((session.conversationId && payload.conversation_id !== session.conversationId) ||
+                (resume && payload.turn_id !== resume.selector.turn_id)) throw new Error('回复所属会话或运行不匹配。');
             session.conversationId = payload.conversation_id;
             assistant.workflowTurnId = payload.turn_id;
             persist();
           } else if (event === 'workflow') {
             if (typeof payload.node !== 'string' || !['enter', 'exit'].includes(payload.phase)) throw new Error('工作流状态格式异常。');
+          } else if (event === 'order_selector') {
+            const selector = validateSelector(payload);
+            if (assistant.orderSelector) throw new Error('重复的订单选择信息。');
+            if (selector.conversation_id !== session.conversationId || selector.turn_id !== assistant.workflowTurnId) throw new Error('订单选择所属会话不匹配。');
+            session.pendingOrder = selector; assistant.orderSelector = selector; assistant.conversationId = session.conversationId; persist();
+          } else if (event === 'paused') {
+            if (!assistant.orderSelector || payload.conversation_id !== session.conversationId || payload.turn_id !== assistant.workflowTurnId || payload.interrupt_id !== assistant.orderSelector.interrupt_id) throw new Error('暂停信息不完整。');
+            terminal = 'paused';
+          } else if (event === 'cancelled') {
+            if (payload.turn_id !== assistant.workflowTurnId || payload.conversation_id !== session.conversationId) throw new Error('取消信息不匹配。');
+            terminal = 'cancelled';
           } else if (event === 'actions') {
             if (payload.conversation_id !== session.conversationId || payload.turn_id !== assistant.workflowTurnId) throw new Error('操作来源会话不匹配。');
             assistant.actions = validateActions(payload).map(action => ({ ...action, verified: true }));
@@ -536,11 +561,16 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
         }
         if (done) break;
       }
-      if (terminal !== "stop" || !assistant.text) {
+      if (terminal === 'paused') { assistant.status = 'waiting_order'; assistant.detail = ''; }
+      else if (terminal === 'cancelled') {
+        assistant.status = 'cancelled'; assistant.text = '已取消本次订单选择，您可以继续咨询。';
+        assistant.orderSelector = null; session.pendingOrder = null;
+      } else if (terminal !== "stop" || !assistant.text) {
         assistant.status = terminal === "length" ? "truncated" : "error";
         assistant.detail = terminal === "length" ? "回复达到长度限制。已执行的工具记录会保留，可缩短问题后继续咨询。" : "回复未完整结束，请核查工具状态后继续。";
       } else {
         assistant.status = "complete";
+        assistant.orderSelector = null; session.pendingOrder = null;
         serviceState(true, "服务已就绪");
         $("announcer").textContent = "客服回复已完成。";
       }
@@ -549,6 +579,7 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
       assistant.detail = requestController.signal.aborted ? `已停止回复。${executionNote(assistant)}` :
         `${error instanceof TypeError ? "网络连接中断，请检查服务。" : error.message || "回复异常。"} ${executionNote(assistant)}`;
       if (!requestController.signal.aborted && !inputRejected) serviceState(false, "本次回复异常");
+      if (resume && session.pendingOrder) { session.pendingOrder.uncertain = true; assistant.orderSelector = session.pendingOrder; }
     } finally {
       try { await reader?.cancel(); } catch { /* Already aborted or closed. */ }
       reader?.releaseLock();
@@ -562,6 +593,58 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
       scrollToBottom();
       $("messageInput").focus({ preventScroll: true });
     }
+  }
+  async function resumeOrder(session, message, selection) {
+    if (busy || current()?.id !== session.id) return;
+    const selector = session.pendingOrder;
+    if (!selector) return;
+    if (selector.selection && JSON.stringify(selector.selection) !== JSON.stringify(selection)) { notify('请先核查已提交的选择。'); return; }
+    selector.request_key ||= crypto.randomUUID().replaceAll('-', ''); selector.selection = selection;
+    if (selection.order_id) selector.selected_order = selection.order_id;
+    persist(); await send('', {selector, message, selection});
+  }
+  async function refreshPending(session, checkResult = false) {
+    if (!session?.conversationId || busy) return;
+    try {
+      if (checkResult && session.pendingOrder?.selection) {
+        const saved = session.pendingOrder;
+        const response = await fetch(`/api/conversations/${session.conversationId}/turns/${saved.turn_id}?user_id=${encodeURIComponent(userId)}`);
+        if (!response.ok) throw new Error('暂时无法核查，请稍后重试。');
+        const status = await response.json();
+        const message = session.messages.find(m => m.workflowTurnId === saved.turn_id && m.role === 'assistant');
+        if (['completed', 'limited', 'cancelled'].includes(status.status) || status.status === 'waiting_order') {
+          if (message) { saved.uncertain = false; await resumeOrder(session, message, saved.selection); return; }
+        }
+        if (status.status === 'active') { notify('该请求仍在处理中，请稍后核查。'); return; }
+        if (['failed', 'interrupted'].includes(status.status)) {
+          session.pendingOrder = null;
+          if (message) { message.orderSelector = null; message.status = 'error'; message.detail = '本轮处理未完成，请重新咨询。'; }
+          persist(); render(); notify('本轮已停止，请重新咨询。'); return;
+        }
+      }
+      const response = await fetch(`/api/conversations/${session.conversationId}/pending?user_id=${encodeURIComponent(userId)}`);
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error?.message || '暂时无法核查订单选择。');
+      if (payload.pending) {
+        const selector = validateSelector(payload.pending);
+        const prior = session.pendingOrder;
+        if (prior?.interrupt_id === selector.interrupt_id) Object.assign(selector, {request_key: prior.request_key, selection: prior.selection,
+          selected_order: prior.selected_order, uncertain: Boolean(prior.selection)});
+        session.pendingOrder = selector;
+        let message = session.messages.find(m => m.workflowTurnId === selector.turn_id && m.role === 'assistant');
+        if (!message) { message = {id: uid(), turnId: uid(), workflowTurnId: selector.turn_id, role: 'assistant', text: '', createdAt: new Date().toISOString(), toolTrace: []}; session.messages.push(message); }
+        Object.assign(message, {status: 'waiting_order', orderSelector: selector, conversationId: session.conversationId});
+      } else if (session.pendingOrder && !session.pendingOrder.selection) {
+        const message = session.messages.find(m => m.workflowTurnId === session.pendingOrder.turn_id && m.role === 'assistant');
+        if (message) message.orderSelector = null;
+        session.pendingOrder = null;
+      } else if (session.pendingOrder?.selection) {
+        session.pendingOrder.uncertain = true;
+        const message = session.messages.find(m => m.workflowTurnId === session.pendingOrder.turn_id && m.role === 'assistant');
+        if (message) message.orderSelector = session.pendingOrder;
+      }
+      persist(); if (current()?.id === session.id) render();
+    } catch (error) { if (checkResult) notify(error.message); }
   }
   $("chatForm").addEventListener("submit", (event) => { event.preventDefault(); void send($("messageInput").value); });
   $("sendButton").addEventListener("click", () => { if (busy) controller?.abort(); });
@@ -604,4 +687,4 @@ import { renderActions, validateActions, restoredActions, WorkflowFrames } from 
   $('closeSource').addEventListener('click', () => $('sourceDialog').close());
   $('sourceDialog').addEventListener('close', () => { sourceView++; });
   window.matchMedia("(max-width: 760px)").addEventListener("change", syncNavAccess);
-  restore(); render(); syncNavAccess(); void checkService();
+  restore(); render(); syncNavAccess(); void checkService(); void refreshPending(current());

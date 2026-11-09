@@ -44,7 +44,11 @@ export function validateActions(payload) {
         !uuid.test(action.action_id || '') || action.origin_assistant_message_id !== payload.message_id ||
         !statuses.has(action.status)) throw new Error('可选操作与原回复不匹配。');
     kinds.add(action.kind);
+    if (action.subtype !== undefined && (action.subtype !== 'refund' || action.kind !== 'ticket' ||
+        typeof action.order_id !== 'string' || !Array.isArray(action.reason_options) || action.reason_options.length !== 6 ||
+        !action.reason_options.every(reason => typeof reason === 'string' && reason))) throw new Error('退款申请来源格式异常。');
     return { action_id: action.action_id, kind: action.kind, status: action.status,
+      ...(action.subtype === 'refund' ? {subtype: 'refund', order_id: action.order_id, reason_options: action.reason_options} : {}),
       origin_assistant_message_id: action.origin_assistant_message_id, result: action.result || null };
   });
 }
@@ -75,12 +79,20 @@ function openConfirmation(message, action, context) {
   const dialog = document.createElement('dialog'); dialog.className = 'workflow-action-dialog';
   const form = document.createElement('form');
   const title = document.createElement('h2');
-  title.textContent = action.kind === 'handoff' ? '确认转人工' : '确认创建工单';
+  const refund = action.subtype === 'refund';
+  title.textContent = action.kind === 'handoff' ? '确认转人工' : refund ? '提交退款申请' : '确认创建工单';
   const note = document.createElement('p');
-  note.textContent = action.kind === 'handoff' ? '本章将展示模拟人工客服问候，您仍可继续对话。' : '只记录您填写的问题，不会同时转人工或执行退款。';
+  note.textContent = action.kind === 'handoff' ? '本章将展示模拟人工客服问候，您仍可继续对话。' : refund ?
+    `订单 ${action.order_id}：提交后生成待处理申请，具体资格与处理结果需审核确认。` : '只记录您填写的问题，不会同时转人工或执行退款。';
   form.append(title, note);
   let description, type;
-  if (action.kind === 'ticket') {
+  if (refund) {
+    const label = document.createElement('label'); label.textContent = '退款原因';
+    type = document.createElement('select'); type.required = true;
+    const placeholder = document.createElement('option'); placeholder.value = ''; placeholder.textContent = '请选择原因'; type.append(placeholder);
+    for (const reason of action.reason_options) { const option = document.createElement('option'); option.value = reason; option.textContent = reason; type.append(option); }
+    label.append(type); form.append(label);
+  } else if (action.kind === 'ticket') {
     const label = document.createElement('label'); label.textContent = '需要记录的问题';
     description = document.createElement('textarea'); description.required = true; description.maxLength = 2000;
     description.placeholder = '请说明订单号、遇到的问题和希望获得的协助。';
@@ -113,10 +125,13 @@ function openConfirmation(message, action, context) {
       context.simulateHandoff(['已转接人工客服', '您好,我是客服小猫,请问有什么可以帮您的']);
       context.changed(); return;
     }
-    const body = { user_id: context.userId, description: description.value.trim(), ticket_type: type.value };
+    if (refund && !type.value) { type.reportValidity(); submitting = false; return; }
+    if (refund) action.requestKey ||= crypto.randomUUID().replaceAll('-', '');
+    const body = refund ? {user_id: context.userId, reason: type.value, request_key: action.requestKey} :
+      { user_id: context.userId, description: description.value.trim(), ticket_type: type.value };
     action.localPending = true; action.status = 'executing'; close(); context.changed();
     try {
-      const path = `/api/conversations/${message.conversationId}/actions/${action.action_id}/ticket`;
+      const path = `/api/conversations/${message.conversationId}/actions/${action.action_id}/${refund ? 'refund' : 'ticket'}`;
       applyResult(action, await context.request(path, { method: 'POST', body }));
     } catch (error) {
       action.status = (error.status === 409 && error.code === 'conversation_busy') || error.status === 422 ? 'offered' : 'unknown';
@@ -141,7 +156,7 @@ export function renderActions(container, message, context) {
     } else {
       const completed = action.verified && action.status === 'completed';
       button.textContent = action.localPending ? '正在核查/提交…' : completed ? `工单 ${action.result.ticket_no} · 待处理` :
-        action.status === 'offered' && action.verified ? '建工单' : '核查工单';
+        action.status === 'offered' && action.verified ? (action.subtype === 'refund' ? '申请退款' : '建工单') : '核查工单';
       button.disabled = Boolean(action.localPending) || completed || context.isBusy();
       button.addEventListener('click', () => action.status === 'offered' && action.verified ?
         openConfirmation(message, action, context) : checkTicket(message, action, context));

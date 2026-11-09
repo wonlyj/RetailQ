@@ -20,6 +20,7 @@ from retailq.db import Database
 from retailq.repositories import ChatRepository
 from retailq.workflow.service import WorkflowChatService
 from retailq.workflow.runtime import WorkflowRuntime
+from retailq.api.workflow import router as workflow_router
 from retailq.workflow.repository import WorkflowRepository
 from retailq.coordination import Coordinator
 from retailq.config import Settings
@@ -76,6 +77,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 repository.rag_required=settings.knowledge_enabled
                 if knowledge is not None:
                     repository.rag_retrieve=knowledge.retrieve
+                    repository.policy_retrieve=knowledge.retrieve_policy
                 from retailq.knowledge.policy import DynamicConfidencePolicy
                 workflow_repository=WorkflowRepository(database)
                 application.state.workflow_repository=workflow_repository
@@ -127,6 +129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     application.include_router(knowledge_router)
     application.include_router(sources_router)
     application.include_router(actions_router)
+    application.include_router(workflow_router)
     web_directory = Path(__file__).parent / "web"
     application.mount("/assets", StaticFiles(directory=web_directory), name="chat-assets")
 

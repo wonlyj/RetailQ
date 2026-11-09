@@ -1,0 +1,12 @@
+{"id":"W01","turns":[{"question":"订单1001的物流到哪了","intent":"物流"},{"question":"它可以退吗","intent":"退款退货","core_case":true},{"question":"还是先查刚才那单的物流吧","intent":"物流"}]}
+{"id":"W02","turns":[{"question":"这个能退吗","intent":"退款退货","selector":"1001","core_case":true,"refund_reason":"不想要了"}]}
+{"id":"W03","turns":[{"question":"退货政策是什么","intent":"退款退货","selector":"1001","core_case":false}]}
+{"id":"W04","turns":[{"question":"订单1002尺码不合适想换货","intent":"售后","core_case":true}]}
+{"id":"W05","turns":[{"question":"订单1001和1002各是什么状态","intent":"订单"},{"question":"它能退吗","intent":"退款退货","selector":"1002","core_case":true}]}
+{"id":"W06","turns":[{"question":"港口堆存超期费用的减免申请怎么办","intent":"其他"}]}
+{"id":"W07","turns":[{"question":"把蓝色星期九寄往昨天的负一层","intent":"其他"}]}
+{"id":"W08","turns":[{"question":"我要投诉客服的服务态度","intent":"投诉"}]}
+{"id":"W09","turns":[{"question":"订单1001签收8天，没有拆封，可以退吗","intent":"退款退货","core_case":true}]}
+{"id":"W10","turns":[{"question":"东西坏了能维修吗","intent":"售后","selector":"cancel"},{"question":"订单1002的物流在哪里","intent":"物流"}]}
+{"id":"W11","turns":[{"question":"债券交易撤单以后手续费如何返还","intent":"其他"}]}
+{"id":"W12","turns":[{"question":"订单001001的金额是多少","intent":"订单"},{"question":"这个能退吗","intent":"退款退货","core_case":true}]}

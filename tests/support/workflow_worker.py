@@ -18,7 +18,7 @@ def main():
     parser.add_argument('--cid',type=int)
     args=parser.parse_args()
     peer=WorkflowUpstream('one' if args.phase=='after-tool' else 'zero')
-    peer.intent='退款退货' if args.phase=='after-finalize' else '订单'
+    peer.intent='商品咨询' if args.phase=='after-finalize' else '订单'
     def save(data):Path(args.output).write_text(json.dumps(data,ensure_ascii=False),encoding='utf-8')
     with run_server(peer.app) as url:
         settings=chat_settings(url,workflow_checkpoint_path=args.checkpoint)

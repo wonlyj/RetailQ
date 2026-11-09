@@ -28,9 +28,12 @@ class ControlledToolUpstream:
             body = await request.json()
             self.requests.append((body,dict(request.headers)))
             workflow='[workflow_agent]' in body['messages'][0].get('content','')
+            if '[workflow_resolve]' in body['messages'][0].get('content',''):
+                return {'id':'resolve','object':'chat.completion','created':0,'model':'test-model',
+                        'choices':[{'index':0,'message':{'role':'assistant','content':json.dumps({'resolved_question':next(m['content'] for m in reversed(body['messages']) if m['role']=='user')},ensure_ascii=False)},'finish_reason':'stop'}]}
             if '[workflow_intent]' in body['messages'][0].get('content',''):
                 return {'id':'intent','object':'chat.completion','created':0,'model':'test-model',
-                        'choices':[{'index':0,'message':{'role':'assistant','content':'{"intent":"物流"}'},'finish_reason':'stop'}]}
+                        'choices':[{'index':0,'message':{'role':'assistant','content':'{"intent":"物流","confidence":0.9}'},'finish_reason':'stop'}]}
             if not body.get('stream'):
                 current=max(i for i,m in enumerate(body['messages']) if m['role']=='user')
                 receipts=[m for m in body['messages'][current+1:] if m['role']=='tool']

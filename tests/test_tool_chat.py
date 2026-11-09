@@ -122,7 +122,7 @@ def test_tool_failures_and_no_tool_contract(test_database, monkeypatch, case):
             assert json.loads(receipt['content'])['ok'] is False
         if case == 'no_tool':
             assert not any(e[0]=='tool_status' for e in events)
-            assert len(upstream.requests)==3
+            assert len(upstream.requests)==4
         if case == 'multiple':
             with test_database.sessions() as session:
                 assert session.scalar(select(func.count()).select_from(Ticket))==1

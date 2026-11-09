@@ -53,7 +53,7 @@ def test_chat_sse_contract_and_client_history():
         client.post("/api/chat/stream", json={"message": "刚才订单号？", "history": history})
         assert [m['content'] for m in upstream.requests[4][0]['messages'] if m['role']!='system'] == ['订单00123','您好','刚才订单号？']
         client.post("/api/chat/stream", json={"message": "新会话"})
-        assert [m['role'] for m in upstream.requests[7][0]['messages']] == ['system','user','system']
+        assert [m['role'] for m in upstream.requests[8][0]['messages']] == ['system','user','system']
 
 
 def test_pre_stream_errors_do_not_call_model():
@@ -84,7 +84,7 @@ def test_stream_error_and_finish_reason(kwargs, last_event):
             assert "sensitive-upstream-secret" not in json.dumps(events)
         else:
             assert events[-1][1]["finish_reason"] == "length"
-        assert upstream.request_count == (1 if kwargs.get('status') == 500 else 3)
+        assert upstream.request_count == (1 if kwargs.get('status') == 500 else 4)
 
 
 @pytest.mark.anyio

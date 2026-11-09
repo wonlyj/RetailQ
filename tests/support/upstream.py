@@ -33,8 +33,10 @@ class ControlledUpstream:
             if not body.get("stream"):
                 if self.nonstream_delay:
                     await asyncio.sleep(self.nonstream_delay)
-                if '[workflow_intent]' in body['messages'][0].get('content',''):
-                    content='{"intent":"订单"}'  # Protocol fixture, not a semantic classifier.
+                if '[workflow_resolve]' in body['messages'][0].get('content',''):
+                    content=json.dumps({'resolved_question':next(m['content'] for m in reversed(body['messages']) if m['role']=='user')},ensure_ascii=False)
+                elif '[workflow_intent]' in body['messages'][0].get('content',''):
+                    content='{"intent":"订单","confidence":0.9}'  # Controlled protocol, not semantics.
                 elif '[workflow_agent]' in body['messages'][0].get('content',''):
                     content='{"actions":[]}'
                 else: content=self.text

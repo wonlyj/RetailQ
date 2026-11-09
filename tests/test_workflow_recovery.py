@@ -70,18 +70,20 @@ async def test_graph_state_is_readable_after_async_sqlite_reopen(test_database,t
     class Classifier:
         async def classify(self,state): return {'intent':'闲聊','route':'smalltalk'}
     class Agent: settings=None
+    class Queries:
+        async def resolve(self,state):return {'resolved_question':state['raw_question']}
     repo=WorkflowRepository(test_database)
     from retailq.schemas import ChatRequest
     turn=repo.start_turn(ChatRequest(user_id='alice',message='你好'))
     config={'configurable':{'thread_id':'recovery-case'}}
     path=str(tmp_path/'state.sqlite')
     async with AsyncSqliteSaver.from_conn_string(path) as saver:
-        graph=build_graph(Agent(),Classifier(),None,repo,saver)
+        graph=build_graph(Agent(),Classifier(),None,repo,saver,query_steps=Queries())
         state={'turn_id':turn.turn_id,'user_message_id':turn.user_message_id,'conversation_id':turn.conversation_id,
                'user_id':'alice','raw_question':'你好','messages':[],'trace':[]}
         await graph.ainvoke(state,config,durability='sync')
     async with AsyncSqliteSaver.from_conn_string(path) as saver:
-        graph=build_graph(Agent(),Classifier(),None,repo,saver)
+        graph=build_graph(Agent(),Classifier(),None,repo,saver,query_steps=Queries())
         snapshot=await graph.aget_state(config)
         assert snapshot.values['raw_question']=='你好' and snapshot.next==()
         assert snapshot.values['final_message_id']>0

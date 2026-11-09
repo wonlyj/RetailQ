@@ -55,7 +55,7 @@ async def test_missing_knowledge_fails_only_faq_tool():
     assert error.value.code=='knowledge_not_configured'
     registry=build_registry(repo,ToolContext(1,'user'),Settings(_env_file=None))
     assert not (await registry.execute({'name':'query_faq','args':{'keyword':'邮费'}})).payload['ok']
-    assert (await registry.execute({'name':'query_order','args':{'order_id':'001'}})).payload['ok']
+    assert (await registry.execute({'name':'query_order','args':{'order_id':'1001'}})).payload['ok']
 
 
 @pytest.mark.anyio
@@ -90,6 +90,7 @@ def test_lifespan_owns_one_store_and_shutdown_order(monkeypatch):
         coordinator=None
         def search_faq(self,query):return []
         def retrieve(self,query,**kwargs):return None
+        def retrieve_policy(self,query,**kwargs):return None
         def close(self):events.append('knowledge-close')
     def opened(settings,database):events.append('knowledge-open');return Knowledge()
     class Scheduler:

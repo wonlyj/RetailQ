@@ -34,7 +34,7 @@ def test_business_chat_uses_graph_tools_then_real_stream(test_database,tmp_path)
         assert len([e for e in events if e[0]=='token'])==2
         cid=events[0][1]['conversation_id']
         assert client.post('/api/chat/stream',json={'user_id':'bob','conversation_id':cid,'message':'偷看'}).status_code==404
-        assert len(peer.requests)==5  # classifier + three decisions + final stream
+        assert len(peer.requests)==6  # resolver + classifier + three decisions + final stream
 
 
 @pytest.mark.parametrize('intent,actions',[('投诉',['handoff','ticket']),('闲聊',[])])
@@ -43,7 +43,7 @@ def test_fixed_routes_have_one_classifier_and_no_agent_or_side_effects(test_data
     with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'state.sqlite')))) as client:
         events=parse_sse(client.post('/api/chat/stream',json={'user_id':'alice','message':'我要投诉' if intent=='投诉' else '你好'}).text)
         assert events[-1][0]=='done'
-        assert len(peer.requests)==1
+        assert len(peer.requests)==2
         frame=next((data for kind,data in events if kind=='actions'),{'actions':[]})
         assert sorted(a['kind'] for a in frame['actions'])==sorted(actions)
         assert not any(kind=='tool_status' for kind,data in events)
@@ -51,7 +51,7 @@ def test_fixed_routes_have_one_classifier_and_no_agent_or_side_effects(test_data
             assert session.scalar(select(func.count()).select_from(Ticket).where(Ticket.conversation_id==events[0][1]['conversation_id']))==0
 
 
-@pytest.mark.parametrize('intent',['商品咨询','退款退货'])
+@pytest.mark.parametrize('intent',['商品咨询'])
 def test_knowledge_route_always_retrieves_before_gate_and_agent(test_database,tmp_path,intent):
     from tests.test_rag_answer import retrieval
     peer=WorkflowUpstream('zero');peer.intent=intent
@@ -64,7 +64,7 @@ def test_knowledge_route_always_retrieves_before_gate_and_agent(test_database,tm
         events=parse_sse(client.post('/api/chat/stream',json={'user_id':'alice','message':'知识库没有的政策'}).text)
         nodes=[data['node'] for kind,data in events if kind=='workflow' and data['phase']=='enter']
         assert nodes==['resolve','intent','route','retrieve','gate','fallback','log']
-        assert len(peer.requests)==1 and events[-1][0]=='done'
+        assert len(peer.requests)==2 and events[-1][0]=='done'
         with test_database.sessions() as session:
             pool=session.scalar(select(LowConfidenceQuestion))
             assert pool.raw_question=='知识库没有的政策'
@@ -73,16 +73,18 @@ def test_knowledge_route_always_retrieves_before_gate_and_agent(test_database,tm
 @pytest.mark.parametrize('valid_refs',[True,False])
 def test_refund_evidence_precedes_agent_order_tool_and_references_control_commit(test_database,tmp_path,valid_refs):
     from tests.test_rag_answer import retrieval
-    peer=WorkflowUpstream('two');peer.intent='退款退货'
+    peer=WorkflowUpstream('zero');peer.intent='退款退货'
     peer.answer_chunks=['退货规则见[1]。' if valid_refs else '没有引用的政策事实。','订单1001为演示结果。']
     class Policy:
         def allows(self,result):return True
     with run_server(peer.app) as url,TestClient(create_app(chat_settings(url,workflow_checkpoint_path=str(tmp_path/'state.sqlite')))) as client:
         runtime=client.app.state.chat_service.runtime
-        runtime.chat_repository.rag_retrieve=lambda q,**kwargs:retrieval(1);runtime.policy=Policy()
+        from tests.support.router_policy import configure_policy
+        configure_policy(runtime,retrieval(1),tmp_path/'controlled.json')
         events=parse_sse(client.post('/api/chat/stream',json={'user_id':'alice','message':'订单1001退货，先政策再查订单'}).text)
         nodes=[d['node'] for k,d in events if k=='workflow' and d['phase']=='enter']
-        assert nodes.index('retrieve')<nodes.index('gate')<nodes.index('agent_decide')<nodes.index('tools')
+        assert nodes.index('load_order')<nodes.index('retrieve_policy')<nodes.index('gate')<nodes.index('agent_decide')
+        assert 'tools' not in nodes
         assert any(k=='tool_status' and d['name']=='query_order' for k,d in events)
         assert events[-1][0]==('done' if valid_refs else 'error')
         if not valid_refs:

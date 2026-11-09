@@ -1,0 +1,8 @@
+{"id":"S01","question":"港口堆存超期费用的减免申请怎么办","intent":"其他","split":"test"}
+{"id":"S02","question":"债券交易撤单以后手续费如何返还","intent":"其他","split":"test"}
+{"id":"S03","question":"酒店不可取消房型的定金能不能退","intent":"其他","split":"test"}
+{"id":"S04","question":"买房合同解约后首付款怎么退回","intent":"其他","split":"test"}
+{"id":"S05","question":"订单1001保温杯不想要了，我要退货","intent":"退款退货","split":"test"}
+{"id":"S06","question":"订单1002运动鞋有质量问题想换货","intent":"售后","split":"test"}
+{"id":"S07","question":"订单001001双肩包的快递进度是什么","intent":"物流","split":"test"}
+{"id":"S08","question":"订单1001的金额能帮我查询吗","intent":"订单","split":"test"}

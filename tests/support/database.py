@@ -41,6 +41,8 @@ def reset_isolated_database(settings):
         migrate_rag(database, Path('db/init/04-rag.sql'))
     from scripts.migrate_workflow import migrate_workflow
     migrate_workflow(database,Path('db/init/05-workflow.sql'))
+    from scripts.migrate_router import migrate_router
+    migrate_router(database,Path('db/init/06-ticket-type.sql'))
     with database.sessions.begin() as session:
         inspector = inspect(session.connection())
         for name in ('workflow_actions','workflow_turns'):

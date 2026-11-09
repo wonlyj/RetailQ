@@ -3,7 +3,10 @@ import json
 from hashlib import sha256
 from retailq.config import Settings
 from retailq.workflow.repository import digest
-from retailq.workflow.classification import ROUTES,SMALLTALK_REPLY,COMPLAINT_REPLY
+from retailq.workflow.classification import SMALLTALK_REPLY,COMPLAINT_REPLY
+# Frozen chapter-five proof semantics; chapter-six routes must not relabel history.
+ROUTES={'物流':'business','订单':'business','售后':'business','商品咨询':'knowledge',
+        '退款退货':'knowledge','投诉':'complaint','闲聊':'smalltalk'}
 from scripts.evaluate_workflow import samples,manifest,auto_checks
 
 

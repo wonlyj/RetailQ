@@ -23,6 +23,8 @@ async def test_cancelled_graph_sql_keeps_lease_until_actual_thread_exit(tmp_path
             return FinalizedTurn('a'*32,2,None,())
     class Classifier:
         async def classify(self,state):return {'intent':'闲聊','route':'smalltalk'}
+    class Queries:
+        async def resolve(self,state):return {'resolved_question':state['raw_question']}
     class Registry:
         pending=()
         async def drain(self):pass
@@ -34,7 +36,8 @@ async def test_cancelled_graph_sql_keeps_lease_until_actual_thread_exit(tmp_path
     runtime=SimpleNamespace(chat_repository=repo,repository=repo,gateway=None,settings=Settings(_env_file=None),coordinator=None)
     service=WorkflowChatService(runtime)
     turn=PreparedWorkflowTurn(TurnRef('a'*32,1,1),'alice','你好',None,Registry(),lease,time.monotonic()+10)
-    turn.graph=build_graph(None,Classifier(),None,repo,MemorySaver())
+    turn.graph=build_graph(None,Classifier(),None,repo,MemorySaver(),query_steps=Queries())
+    runtime.snapshot=lambda cid:turn.graph.aget_state({'configurable':{'thread_id':'cancel-sql'}})
     turn.state={'turn_id':'a'*32,'conversation_id':1,'user_message_id':1,'user_id':'alice','raw_question':'你好','trace':[]}
     async def consume():
         try:
@@ -121,6 +124,7 @@ async def test_long_history_drops_old_turns_for_current_stage_and_evidence(knowl
     from tests.test_rag_answer import retrieval
     class Repository:
         def interrupt_active(self,*args):pass
+        def latest_turn(self,*args):return None
         def load_projection(self,*args):return [[HumanMessage(content='hello'),AIMessage(content='world')] for _ in range(300)]
         def start_turn(self,*args):return TurnRef('a'*32,1,1)
     class Gateway:
@@ -132,6 +136,7 @@ async def test_long_history_drops_old_turns_for_current_stage_and_evidence(knowl
         repository=Repository();chat_repository=repository;gateway=Gateway();settings=Settings(_env_file=None)
         coordinator=SimpleNamespace(try_acquire=lambda *args:SimpleNamespace(close=lambda:None))
         def graph_for(self,turn):return None
+        async def snapshot(self,cid):return SimpleNamespace(interrupts=(),values={},next=())
         async def rebase(self,*args):return {}
     service=WorkflowChatService(Runtime())
     turn=await service.prepare(ChatRequest(user_id='alice',conversation_id=1,message='当前短问题'))

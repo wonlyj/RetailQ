@@ -45,6 +45,6 @@ class Ticket(Base):
     ticket_no: Mapped[str] = mapped_column(String(32), primary_key=True)
     conversation_id: Mapped[int] = mapped_column(BIGINT(unsigned=True), ForeignKey("conversations.id"), index=True)
     description: Mapped[str] = mapped_column(Text)
-    ticket_type: Mapped[str] = mapped_column(ENUM("售后", "投诉", "咨询"))
+    ticket_type: Mapped[str] = mapped_column(ENUM("售后", "投诉", "咨询", "退款"))
     status: Mapped[str] = mapped_column(ENUM("待处理", "已处理"), server_default="待处理")
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=text("CURRENT_TIMESTAMP"))

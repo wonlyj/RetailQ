@@ -32,4 +32,4 @@ class FAQInput(ToolInput):
 
 class TicketInput(ToolInput):
     description: Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=2000)] = Field(description='用户说明的问题事实和人工处理诉求')
-    ticket_type: Literal['售后', '投诉', '咨询'] = Field(description='工单类型')
+    ticket_type: Literal['售后', '投诉', '咨询', '退款'] = Field(description='工单类型；退款必须通过绑定订单和固定原因的专用确认入口')

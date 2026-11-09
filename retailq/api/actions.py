@@ -2,6 +2,7 @@ from dataclasses import asdict
 from fastapi import APIRouter,Request
 from retailq.errors import ServiceError
 from retailq.tools.schemas import TicketInput,Identifier
+from retailq.workflow.refunds import RefundRequest
 
 router=APIRouter()
 
@@ -24,3 +25,8 @@ async def confirm_ticket(request:Request,conversation_id:int,action_id:str,body:
 @router.get('/api/conversations/{conversation_id}/actions/{action_id}/ticket')
 async def ticket_status(request:Request,conversation_id:int,action_id:str,user_id:str):
     return asdict(await _service(request).get(conversation_id,user_id,action_id))
+
+
+@router.post('/api/conversations/{conversation_id}/actions/{action_id}/refund')
+async def confirm_refund(request:Request,conversation_id:int,action_id:str,body:RefundRequest):
+    return asdict(await _service(request).confirm_refund(conversation_id,body.user_id,action_id,body.reason,body.request_key))

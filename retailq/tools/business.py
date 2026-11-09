@@ -11,9 +11,9 @@ from retailq.tools.schemas import FAQInput, OrderInput, ProductInput, TicketInpu
 def business_tools(repository, context):
     @tool(args_schema=OrderInput)
     async def query_order(order_id: str) -> dict:
-        """用订单号查询订单状态与金额。内部随机生成演示数据，不是公司真实订单接口。"""
-        return {'source':'demo', 'order_id':order_id,
-                'status':random.choice(['待发货','已发货','已完成']), 'amount':round(random.uniform(20,500),2)}
+        """用订单号查询固定演示订单；与聊天选单卡片共用目录，不是公司真实订单接口。"""
+        from retailq.workflow.demo_orders import DemoOrderProvider
+        return DemoOrderProvider().get_order(context.user_id,order_id)
 
     @tool(args_schema=ProductInput)
     async def query_product(product_id: str) -> dict:

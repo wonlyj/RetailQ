@@ -1,6 +1,6 @@
 # RetailQ 第六章人工测试指南
 
-日期：2026-11-09。项目：`D:\AI-Agent\RetailQ`。
+日期：2026-11-10。项目：`D:\AI-Agent\RetailQ`。
 
 本指南使用本机既有3308隔离MySQL、19531隔离Milvus和第四章语料，不修改3306演示库。保留已有`.env`中的模型/数据库/向量密钥，不要覆盖。GUI实际点击由用户执行并反馈；自动后端验证与浏览器验收分别记录。
 
@@ -18,6 +18,8 @@ $Docker = "$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin\docker.exe"
 & $Docker compose -p retailq-ch04-eval -f compose.test.yaml -f artifacts/ch04-eval-compose.yaml up -d --wait mysql
 
 $env:PYTHONIOENCODING = 'utf-8'
+$env:OPENBLAS_NUM_THREADS = '1'
+$env:OMP_NUM_THREADS = '1'
 $env:MYSQL_PORT = '3308'
 $env:MYSQL_DATABASE = 'retailq_test'
 $env:MILVUS_URI = 'http://127.0.0.1:19531'
@@ -28,8 +30,8 @@ $env:KNOWLEDGE_ENABLED = 'true'
 $env:KNOWLEDGE_SCHEDULE_ENABLED = 'false'
 $env:RERANK_REUSE_EMBEDDING_KEY = 'true'
 $env:RAG_CONFIDENCE_PATH = 'artifacts/ch04-eval-knowledge/rag-confidence-relevance-v2.json'
-$env:WORKFLOW_POLICY_SINGLE_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261109-b/policy_single.json'
-$env:WORKFLOW_POLICY_MULTI_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261109-b/policy_multi.json'
+$env:WORKFLOW_POLICY_SINGLE_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-e/policy_single.json'
+$env:WORKFLOW_POLICY_MULTI_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-e/policy_multi.json'
 $env:WORKFLOW_CHECKPOINT_PATH = 'artifacts/ch06-acceptance/checkpoints.sqlite'
 
 Test-Path $env:RAG_CONFIDENCE_PATH
@@ -70,6 +72,7 @@ Start-Process 'http://127.0.0.1:18806/'
 | L | 出现选择器后点`取消本次选择`，再问`订单1002的物流在哪里` | 显示已取消，再次正常查询物流；暂停不能被新文字静默覆盖。 |
 | M | 点击政策来源，查看原文；把窗口缩窄或用手机尺寸 | 原文可打开，引用对应条款；卡片、原因下拉、提交/取消均能点，不横向溢出。 |
 | N | 新对话输入`我要投诉客服的服务态度` | 仍有两个独立按钮“转人工”“建工单”；不点不执行，普通工单仍有原三类，模拟人工不创建退款。 |
+| O | 新对话先查`订单1001的物流在哪里`，再说`不是订单1001，我要退另一单`或`我要退新买的运动鞋，之前那单不要退` | 必须出现选择器；选择1002后按1002处理，不默认沿用被否定的1001。 |
 
 如果操作后提示“结果待核查”，先点核查，不更换订单、原因或重复发送新请求。遇到明确失败可新建对话复现并反馈；停止/刷新不撤销已经确认提交的工单。
 
@@ -110,5 +113,6 @@ I 其他兜底：通过/失败
 J/K 刷新及重启恢复：通过/失败
 L 取消后继续物流：通过/失败
 M/N 来源、窄屏、旧按钮：通过/失败
+O 否定旧单及换对象：通过/失败
 若失败：原问题、选择订单、点击顺序、窗口A对应turn_id/错误行；可附截图。
 ```

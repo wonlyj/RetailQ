@@ -89,6 +89,12 @@ async def test_complete_explicit_order_question_cannot_be_stylistically_rewritte
     raw='还是查询订单1002的运输进度'
     patch=await QuerySteps(Gateway(),Settings(_env_file=None)).resolve({'raw_question':raw,'messages':[HumanMessage(content=raw)]})
     assert patch['resolved_question']==raw
+    class ParticleGateway:
+        async def resolve_query(self,*args,**kwargs):return '早上好',None
+    greeting='早上好呀'
+    patch=await QuerySteps(ParticleGateway(),Settings(_env_file=None)).resolve({
+        'raw_question':greeting,'messages':[HumanMessage(content=greeting)]})
+    assert patch['resolved_question']==greeting
 
 
 @pytest.mark.anyio
@@ -102,4 +108,31 @@ async def test_no_tool_control_decision_forces_json():
     try:
         assert (await gateway.decide_agent([HumanMessage(content='JSON控制决策')],[],max_tokens=128)).actions==()
         model.bind.assert_called_once_with(response_format={'type':'json_object'})
+        model.bind_tools.return_value=bound
+        available=[Mock()]
+        assert (await gateway.decide_agent([HumanMessage(content='无需再查工具')],available,max_tokens=128)).actions==()
+        model.bind_tools.assert_called_once_with(available,tool_choice='auto',parallel_tool_calls=False,strict=True)
+        assert bound.ainvoke.call_args.kwargs['response_format']=={'type':'json_object'}
+        gateway.settings=gateway.settings.model_copy(update={'openai_base_url':'https://api.deepseek.com/v1','openai_model':'deepseek-flash'})
+        await gateway.decide_agent([HumanMessage(content='JSON控制')],[],max_tokens=128)
+        assert bound.ainvoke.call_args.kwargs['extra_body']=={'thinking':{'type':'disabled'}}
+        assert bound.ainvoke.call_args.kwargs['temperature']==0
+        bound.ainvoke.return_value=AIMessage(content='{"resolved_question":"完整问题"}',response_metadata={'finish_reason':'stop'})
+        await gateway.resolve_query([HumanMessage(content='完整问题')],max_tokens=128)
+        assert 'extra_body' not in bound.ainvoke.call_args.kwargs
     finally:await gateway.aclose()
+
+
+@pytest.mark.anyio
+async def test_expand_original_is_deduplicated_only_with_two_real_queries():
+    from retailq.workflow.query_processing import QuerySteps
+    raw='订单001001申请无理由退货的时限要求'
+    class Gateway:
+        values=(raw,'退货时限起算规则','退货商品状态与例外')
+        async def expand_query(self,*args,**kwargs):return self.values,None
+    gateway=Gateway();steps=QuerySteps(gateway,Settings(_env_file=None))
+    state={'resolved_question':raw,'agent':{}}
+    result=await steps.expand(state)
+    assert result['queries']==[raw,'退货时限起算规则','退货商品状态与例外']
+    gateway.values=(raw,'退货时限起算规则')
+    with pytest.raises(ServiceError):await steps.expand(state)

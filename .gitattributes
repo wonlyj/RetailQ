@@ -1,2 +1,3 @@
 db/init/04-rag.sql -text
 db/init/05-workflow.sql -text
+db/init/06-ticket-type.sql -text

@@ -5,11 +5,12 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing
 from dataclasses import dataclass, asdict, is_dataclass
 from uuid import uuid4
+from urllib.parse import urlparse
 from typing import Protocol
 
 import httpx
 from langchain_core.exceptions import OutputParserException
-from langchain_core.messages import AIMessage, BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage, convert_to_openai_messages
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
 from openai import APITimeoutError, AuthenticationError, RateLimitError
@@ -100,7 +101,14 @@ class OpenAIModelGateway:
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 options = {'max_tokens':max_tokens} if max_tokens is not None else {}
-                model=(self.model.bind_tools(tools,tool_choice='auto',parallel_tool_calls=False) if tools
+                # DeepSeek's JSON mode may blank non-JSON thinking output even
+                # with finish_reason=stop. Only control decisions opt out;
+                # contextual routing and user-visible answers keep their mode.
+                if (urlparse(self.settings.openai_base_url or '').hostname=='api.deepseek.com'
+                        and (self.settings.openai_model or '').lower().startswith('deepseek')):
+                    options.update(extra_body={'thinking':{'type':'disabled'}},temperature=0)
+                if tools:options['response_format']={'type':'json_object'}
+                model=(self.model.bind_tools(tools,tool_choice='auto',parallel_tool_calls=False,strict=True) if tools
                        else self.model.bind(response_format={'type':'json_object'}))
                 response = await model.ainvoke(messages,**options)
             reason = response.response_metadata.get('finish_reason')
@@ -176,6 +184,17 @@ class OpenAIModelGateway:
         try:
             async with asyncio.timeout(self.settings.model_timeout_seconds):
                 options = {'max_tokens':max_tokens} if max_tokens is not None else {}
+                if (urlparse(self.settings.openai_base_url or '').hostname=='api.deepseek.com'
+                        and (self.settings.openai_model or '').lower().startswith('deepseek')
+                        and any(isinstance(m,AIMessage) and m.tool_calls for m in messages)):
+                    # Controls are non-thinking, so their tool calls have no
+                    # reasoning output. DeepSeek still requires an explicit
+                    # empty field when continuing in thinking answer mode.
+                    wire=convert_to_openai_messages(messages)
+                    for message in wire:
+                        if message['role']=='assistant' and message.get('tool_calls'):
+                            message['reasoning_content']=''
+                    options['extra_body']={'messages':wire}
                 async with aclosing(self.model.astream(messages,**options)) as stream:
                     async for chunk in stream:
                         if chunk.tool_calls or chunk.tool_call_chunks or chunk.additional_kwargs.get("tool_calls"):

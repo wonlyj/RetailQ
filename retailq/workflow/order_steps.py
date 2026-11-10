@@ -8,6 +8,11 @@ from retailq.services.chat import ChatEvent
 from retailq.workflow.sql import write_sql
 
 _ORDER=re.compile(r'订单(?:号)?\s*[:：]?\s*([A-Za-z0-9_-]+(?:\s*(?:和|与|及|、|，|,)\s*[A-Za-z0-9_-]+)*)')
+_CHANGED_TARGET=re.compile(
+    r'另(?:一|个|笔|件)|其他|别的|换(?:一|个|笔|件)|新(?:的)?(?:订单|商品)|'
+    r'(?:不是|不要|别选|不选|排除|不退|不处理).{0,16}(?:订单|这单|那单|这笔|那笔|刚才|之前)|'
+    r'订单.{0,24}(?:不退|不选|不要)|(?:这|那|该)(?:笔|个)?单.{0,16}(?:不退|不选|不要)')
+_HISTORY_POINTER=re.compile(r'它|这个|那个|这单|那单|该单|这笔|那笔|刚才|刚刚|上面')
 
 
 def _explicit(text):
@@ -15,8 +20,14 @@ def _explicit(text):
 
 
 def confirmed_order_ids(messages,raw_question):
+    # A trusted mention is not necessarily a selected target. Ambiguity and
+    # exclusions use the existing picker; model rewrites never authorize IDs.
+    if _CHANGED_TARGET.search(raw_question):return ()
     current=_explicit(raw_question)
     if current:return current
+    if (not _HISTORY_POINTER.search(raw_question)
+            or re.search(r'商品(?:编号|号)?\s*[:：]?\s*[A-Za-z0-9_-]+',raw_question)):
+        return ()
     ids=[]
     last_human=next((i for i in range(len(messages)-1,-1,-1) if messages[i].type=='human'),None)
     calls={}

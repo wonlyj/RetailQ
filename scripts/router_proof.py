@@ -16,6 +16,7 @@ def validate_manifest(expected,observed):
 
 
 def validate_turn(expected,row):
+    if 'question' in expected and row.get('question')!=expected['question']:raise ValueError('question differs from frozen sample')
     streams=row.get('streams',[])
     if not streams:raise ValueError('missing stream evidence')
     metadata=[];nodes=[];answer='';terminal=None
@@ -104,6 +105,18 @@ def validate_turn(expected,row):
                 raise ValueError('source archive proof missing')
     if intent=='其他' and any(n in nodes for n in ('load_order','retrieve','retrieve_policy','tools')):
         raise ValueError('other intent executed business')
+    if expected.get('read_order_ids'):
+        tool_name='query_logistics' if intent=='物流' else 'query_order'
+        found=set()
+        for message in runtime['messages']:
+            for call in message.get('tool_calls') or []:
+                if call['function']['name']!=tool_name:continue
+                order_id=json.loads(call['function']['arguments']).get('order_id')
+                receipt=next((m for m in runtime['messages'] if m['role']=='tool' and m.get('tool_call_id')==call['id']),None)
+                if receipt:
+                    value=json.loads(receipt['content'])
+                    if value.get('ok') is True and value.get('data',{}).get('order_id')==order_id:found.add(order_id)
+        if not set(expected['read_order_ids'])<=found:raise ValueError('requested business receipts missing')
     if expected.get('refund_reason'):
         tickets=runtime['tickets'];confirmations=row.get('confirmations',[])
         if len(tickets)!=1 or len(confirmations)!=2 or confirmations[0]['ticket']['ticket_no']!=confirmations[1]['ticket']['ticket_no']:

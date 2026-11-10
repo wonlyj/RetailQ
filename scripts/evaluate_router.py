@@ -11,9 +11,26 @@ from langchain_core.messages import AIMessage,HumanMessage
 from retailq.config import Settings
 from retailq.gateway import OpenAIModelGateway,public_error
 from retailq.workflow.classification import IntentClassifier
-from retailq.workflow.query_processing import QuerySteps
+from retailq.workflow.query_processing import QuerySteps,effective_resolution,effective_queries
+from retailq.workflow.router_contracts import parse_resolution,parse_intent,parse_query_plan,parse_queries
+from retailq.errors import ServiceError
 
 ROOT=Path(__file__).resolve().parents[1]
+
+
+def parse_observations(observations):
+    stages={};parsed=0;failed=False
+    parsers={'resolve':parse_resolution,'intent':parse_intent,'plan':parse_query_plan,'expand':parse_queries}
+    for call_id,value in observations.items():
+        stage=value.get('stage')
+        try:
+            if ('raw_content' not in value or stage not in parsers or call_id!=value.get('call_id')
+                    or value.get('finish_reason')!='stop' or value.get('tool_calls')):raise ValueError('invalid completion')
+            result=parsers[stage](value['raw_content']);parsed+=1
+            if value.get('phase')!='parsed' or stage in stages:raise ValueError('invalid stage receipt')
+            stages[stage]=result
+        except (KeyError,TypeError,ValueError,ServiceError):failed=True
+    return stages,parsed,failed
 
 
 def summarize(report):
@@ -35,7 +52,25 @@ def summarize(report):
                 if row.get('input')!=case:failed.append(row['id']);continue
                 actual=row.get('actual',{})
                 if actual.get('intent')!=case['intent'] or (case.get('verbatim',True) and actual.get('resolved_question')!=case['question']):failed.append(row['id'])
+                stages,count,invalid=parse_observations(row.get('observations',{}))
+                if invalid or set(stages) not in ({'resolve','intent'},{'resolve','intent','plan'},{'resolve','intent','plan','expand'}):
+                    failed.append(row['id']);continue
+                if (stages['intent'].intent!=actual.get('intent') or stages['intent'].confidence!=actual.get('confidence')):
+                    failed.append(row['id'])
+                if effective_resolution(case['question'],stages['resolve'])!=actual.get('resolved_question'):
+                    failed.append(row['id'])
+                core=case['intent'] in ('退款退货','售后')
+                if ('plan' in stages)!=core:failed.append(row['id'])
+                if core and 'plan' in stages:
+                    plan=stages['plan'].core_case
+                    if (actual.get('query_plan')!={'core_case':plan} or ('expand' in stages)!=plan
+                            or (case.get('core_case') is not None and case['core_case']!=plan)):
+                        failed.append(row['id'])
+                    try:queries=effective_queries(actual.get('resolved_question'),stages['expand']) if plan else [actual.get('resolved_question')]
+                    except (KeyError,ServiceError):failed.append(row['id']);continue
+                    if actual.get('queries')!=queries:failed.append(row['id'])
         except (KeyError,ValueError,TypeError):failed.append('frozen_samples')
+        parsed=sum(parse_observations(row.get('observations',{}))[1] for row in rows)
     return {'status':'fail' if failed else 'pass' if complete and reviewed else 'pending',
             'complete':complete,'json_received':received,'json_parsed':parsed,
             'json_parse_rate':parsed/received if received else None,'failed_ids':failed}
@@ -114,11 +149,14 @@ def summarize_workflow(report):
     except (ValueError,KeyError,TypeError):failures.append('executable_manifest')
     complete=report.get('run_complete') is True and [c.get('id') for c in cases]==[c['id'] for c in expected]
     for case,spec in zip(cases,expected):
+        case_identities=[]
+        if not isinstance(case.get('user_id'),str) or not case['user_id']:failures.append(case.get('id','unknown')+':user')
         if len(case.get('turns',[]))!=len(spec['turns']):failures.append(case['id']);continue
         for actual,label in zip(case['turns'],spec['turns']):
             key=case['id']+':'+str(len(identities))
             try:
-                identities.append(validate_turn(label,actual))
+                identity=validate_turn(label,actual);identities.append(identity);case_identities.append(identity)
+                if actual['runtime'].get('user_id')!=case.get('user_id'):raise ValueError('SQL owner differs from request user')
                 gate=actual['runtime']['turn']['payload'].get('final',{}).get('gate') or {}
                 if label['intent'] in ('退款退货','售后') and label.get('selector')!='cancel':
                     mode=gate.get('strategy')
@@ -127,6 +165,11 @@ def summarize_workflow(report):
             review=actual.get('review',{})
             if review.get('status')=='fail':failures.append(key)
             elif review.get('status')!='pass' or not review.get('reason','').strip():pending.append(key)
+        if (len({i[0] for i in case_identities})!=1
+                or [i[2] for i in case_identities]!=sorted(i[2] for i in case_identities)):
+            failures.append(case['id']+':conversation_chain')
+    case_cids=[c['turns'][0]['runtime']['turn']['conversation_id'] for c in cases if c.get('turns') and c['turns'][0].get('runtime')]
+    if len(set(case_cids))!=len(case_cids):failures.append('reused_conversation')
     if len({identity[1] for identity in identities})!=len(identities) or len({identity[2] for identity in identities})!=len(identities):failures.append('reused_turn')
     return {'status':'fail' if failures else 'pass' if complete and not pending else 'pending','complete':complete,
             'workflow_cases':len(cases),'turns':len(identities),'failed_ids':failures,'pending_review':pending}
@@ -149,14 +192,15 @@ async def stream_request(client,path,body):
 
 def capture_runtime(database,turn_id,user_id):
     from sqlalchemy import select
-    from retailq.models import Ticket
+    from retailq.models import Ticket,Conversation
     from retailq.repositories import ChatRepository
     from retailq.workflow.repository import WorkflowRepository
     turn=WorkflowRepository(database).get_turn(turn_id,user_id)
     messages=ChatRepository(database).load_messages(turn['conversation_id'],user_id)
     with database.sessions() as session:
+        owner=session.get(Conversation,turn['conversation_id']).user_id
         tickets=session.scalars(select(Ticket).where(Ticket.conversation_id==turn['conversation_id'])).all()
-        return {'turn':turn,'messages':[{'id':m.id,'role':m.role,'content':m.content,'tool_calls':m.tool_calls,'tool_call_id':m.tool_call_id}
+        return {'turn':turn,'user_id':owner,'messages':[{'id':m.id,'role':m.role,'content':m.content,'tool_calls':m.tool_calls,'tool_call_id':m.tool_call_id}
             for m in messages if m.id>=turn['user_message_id']],
             'tickets':[{'ticket_no':t.ticket_no,'description':t.description,'ticket_type':t.ticket_type,'status':t.status} for t in tickets]}
 

@@ -120,7 +120,7 @@ $RunDir = 'artifacts/evals/ch06/run-' + (Get-Date -Format yyyyMMdd-HHmmss)
 & $ProjectPython -m scripts.evaluate_router review --report "$RunDir/report.json"
 ```
 
-真实Prompt评估命令为`python -m scripts.evaluate_router prompts --output <全新artifacts/evals/ch06目录>`，冻结56条样例；正式HTTP全图冻结12场景/17轮，含同轮暂停恢复、物流→退款→物流和唯一退款工单。原始completion、SQL、checkpoint、政策归档和可执行SHA均入证据；作者逐条语义审阅后才可通过。退出0通过、1失败、2待审。修改代码/Prompt使用新目录，保留失败报告，不能用旧manifest冒充当前版本。默认模型配置名不等于已验证供应商真实部署身份。
+真实Prompt评估命令为`python -m scripts.evaluate_router prompts --output <全新artifacts/evals/ch06目录>`，冻结58条样例；正式HTTP全图冻结14场景/21轮，含同轮暂停恢复、物流→退款→物流和唯一退款工单。原始completion、SQL、checkpoint、政策归档和可执行SHA均入证据；作者逐条语义审阅后才可通过。退出0通过、1失败、2待审。修改代码/Prompt使用新目录，保留失败报告，不能用旧manifest冒充当前版本。默认模型配置名不等于已验证供应商真实部署身份。
 
 第五章`evaluate_workflow`/`smoke_workflow`及第2章工具评估保留历史用途，冻结标签不改为第六章标签，也不作为新版验收入口。底层政策分数闸独立测试中的误放与正式分流边界分别报告，见[第六章评估](docs/ch06-evaluation.md)。
 

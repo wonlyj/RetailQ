@@ -3,6 +3,7 @@ import asyncio
 from contextlib import aclosing
 import json
 import time
+from datetime import date
 
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
@@ -15,7 +16,7 @@ from retailq.workflow.sql import write_sql
 
 READ_TOOLS = frozenset(('query_order', 'query_product', 'query_logistics'))
 LIMIT_ANSWER = '本轮查询已达到步骤或预算上限，请补充信息或分开提问；已完成的查询记录会保留。'
-DECISION_STAGE = '[workflow_decision] 当前请求仅为控制决策阶段，不是最终答复阶段。每次最多申请一个工具、查询一个订单。即使用户要求查多单，也必须先查一单、等待真实回执，再在下一次决策查另一单；禁止一次输出多个tool_calls。若无需调用工具，只输出单个JSON对象，例如 {"actions":[]}。禁止在JSON前后输出任何自然语言、追问或解释；下一次独立请求才生成用户可见的答复。'
+DECISION_STAGE = '[workflow_decision] 当前请求仅为控制决策阶段，不是最终答复阶段。每次最多申请一个工具、查询一个订单。即使用户要求查多单，也必须先查一单、等待真实回执，再在下一次决策查另一单；禁止一次输出多个tool_calls。若无需调用工具，输出必须逐字符合以下四种结构之一：{"actions":[]}、{"actions":["handoff"]}、{"actions":["ticket"]}、{"actions":["handoff","ticket"]}。字段只能有actions，值只能是这些英文动作标识的数组，不输出退款资格、原因、订单号或其他字段。禁止在JSON前后输出任何自然语言、追问或解释；下一次独立请求才生成用户可见的答复。'
 
 
 def answer_instruction(actions=(),knowledge=False,refund=False):
@@ -69,6 +70,12 @@ class AgentSteps:
         if agent['step'] >= self.settings.workflow_max_tool_steps:
             return self.limited(state)
         decision_state={**state,'messages':[*state['messages'],SystemMessage(content=DECISION_STAGE)]}
+        if state.get('route')=='business':
+            required=(f'本轮实际已执行工具步数：{agent["step"]}。历史轮回执不算本轮查询。'
+                '当前用户明确提供订单号或商品号并查询业务数据时，必须先获取本轮真实工具回执；不能直接返回空actions跳过查询。'
+                '多单问题先调用一个只读工具，取得回执后继续查尚未查询的下一单，查齐再返回动作JSON。'
+                '若缺少工具所需ID，不能猜测，才返回动作JSON让下一阶段追问。只把成功回执当作已获取事实。')
+            decision_state['messages'][-1]=SystemMessage(content=DECISION_STAGE+required)
         restricted=state.get('route') in ('core','other')
         try: agent, ledger, reservation, cap = self._reserve(decision_state, tools=not restricted, stage='agent_decision')
         except BudgetExceeded: return self.limited(state)
@@ -122,7 +129,8 @@ class AgentSteps:
     async def answer(self, state):
         # The control JSON never becomes assistant prose or model history.
         instruction=answer_instruction(state.get('actions',[]),bool(state.get('evidence',{}).get('citations')),state.get('route')=='core' and state.get('intent')=='退款退货')
-        if state.get('route')=='core':instruction+='订单和政策已由流程确认，只判断本单条件；未知商品状态或缺材料应条件化说明或必要澄清。商品名称不能证明非定制或包装完好；是否定制、是否影响二次销售等未知字段必须保留条件，不可默认满足。不要追问订单号、退款原因，不把未知字段当事实，不承诺已退款。'
+        if state.get('route')=='core':instruction+='订单和政策已由流程确认，只判断本单条件；未知商品状态或缺材料应条件化说明或必要澄清。商品名称不能证明非定制、商品完好或不影响二次销售；未知字段保留条件，不可默认满足。只使用本轮引用条款明示的资格条件，未检索到的时限、运费或例外不可用常识补齐；条款未写包装、吊牌或配件要求时不得自行追加。不要追问订单号、退款原因，不把未知字段当事实，不承诺已退款。'
+        if state.get('route')=='core':instruction+=f'当前服务本地日期为{date.today().isoformat()}。涉及时限时按该日期与订单记录说明；若用户口述的天数与记录不一致，明确指出并请用户核实，只给分别成立时的条件判断，不直接断定该单可退或不可退。'
         if state.get('route')=='other':instruction+='当前诉求不明确或超出购物客服范围，只作简短澄清或范围说明，不声称已查询业务。'
         final_messages = [*state['messages'],SystemMessage(content=instruction)]
         working = {**state,'messages':final_messages}

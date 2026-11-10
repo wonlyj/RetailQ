@@ -12,6 +12,32 @@ from tests.support.upstream import ControlledUpstream
 pytestmark = pytest.mark.anyio
 
 
+async def test_deepseek_tool_receipts_keep_thinking_answer_wire_compatible():
+    import json
+    from langchain_core.messages import AIMessage,ToolMessage
+    from retailq.gateway import OpenAIModelGateway
+    upstream=ControlledUpstream()
+    messages=[HumanMessage(content='订单001001的状态'),
+              AIMessage(content='',tool_calls=[{'id':'call1','name':'query_order','args':{'order_id':'001001'}}]),
+              ToolMessage(content='{"ok":true}',tool_call_id='call1')]
+    with run_server(upstream.app) as url:
+        gateway=OpenAIModelGateway(settings_for(url))
+        gateway.settings=gateway.settings.model_copy(update={'openai_base_url':'https://api.deepseek.com/v1','openai_model':'deepseek-flash'})
+        try:
+            chunks=[chunk async for chunk in gateway.stream(messages)]
+            assert chunks[-1].finish_reason=='stop'
+            body=upstream.requests[-1][0]
+            assert [m['role'] for m in body['messages']]==['user','assistant','tool']
+            assert body['messages'][1]['reasoning_content']==''
+            assert json.loads(body['messages'][1]['tool_calls'][0]['function']['arguments'])=={'order_id':'001001'}
+            assert body['messages'][2]['tool_call_id']=='call1' and 'thinking' not in body
+            assert 'reasoning_content' not in messages[1].additional_kwargs
+            gateway.settings=gateway.settings.model_copy(update={'openai_base_url':'https://api.openai.com/v1'})
+            [chunk async for chunk in gateway.stream(messages)]
+            assert 'reasoning_content' not in upstream.requests[-1][0]['messages'][1]
+        finally:await gateway.aclose()
+
+
 def settings_for(url, **kwargs):
     return Settings(_env_file=None, openai_base_url=url + "/v1", openai_api_key="fixture-secret",
                     openai_model="test-model", **kwargs)

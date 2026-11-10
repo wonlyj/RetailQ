@@ -6,3 +6,5 @@
 {"id":"S06","question":"订单1002运动鞋有质量问题想换货","intent":"售后","split":"test"}
 {"id":"S07","question":"订单001001双肩包的快递进度是什么","intent":"物流","split":"test"}
 {"id":"S08","question":"订单1001的金额能帮我查询吗","intent":"订单","split":"test"}
+{"id":"S09","question":"不是订单1001，我要退另一单","intent":"退款退货","core_case":true,"verbatim":true}
+{"id":"S10","history":[{"role":"user","content":"订单1001的物流在哪里"},{"role":"assistant","content":"订单1001正在运输。"}],"question":"商品2001能退吗","intent":"退款退货","core_case":true,"verbatim":true}

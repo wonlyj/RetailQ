@@ -40,6 +40,10 @@ class PolicyRetriever:
         ordered=sorted(pool,key=lambda key:(-scores[key],key[0]))
         merged=tuple(replace(pool[key],rank=i,score=scores[key]) for i,key in enumerate(ordered,1))
         check()
-        final=self.reranker.rerank(question,merged,deadline=deadline) if merged else ()
+        # Binding an order is separate from finding the governing policy. The
+        # first expansion is the canonical policy question, retaining material
+        # conditions without order identifiers or selection instructions.
+        policy_question=queries[1] if mode=='policy_multi' else question
+        final=self.reranker.rerank(policy_question,merged,deadline=deadline) if merged else ()
         check()
-        return RetrievalResult(QueryUnderstanding(question,question,question),snapshot,mode,tuple(final[:10]),())
+        return RetrievalResult(QueryUnderstanding(question,policy_question,policy_question),snapshot,mode,tuple(final[:10]),())

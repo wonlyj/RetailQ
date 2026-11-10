@@ -30,13 +30,14 @@ def freeze_result(result):
                 'chunk_ids':[i for i in source.chunk_ids if i in ids],
                 'line_ranges':[list(row) for row in source.line_ranges if row[0] in ids]})
     return {'strategy':result.strategy,'question':result.understanding.raw_question,
+            'rerank_query':getattr(result.understanding,'normalized_query',result.understanding.raw_question),
             'corpus_hash':result.snapshot.corpus_hash,'sources':sources,
             'approved_ids':[i for i in result.snapshot.approved_ids if i in ids],
             'candidates':[{'id':c.id,'rank':c.rank,'score':c.score,'draft':asdict(c.draft)} for c in result.candidates]}
 
 
 def thaw_result(data):
-    return SimpleNamespace(strategy=data['strategy'],understanding=SimpleNamespace(raw_question=data['question']),
+    return SimpleNamespace(strategy=data['strategy'],understanding=SimpleNamespace(raw_question=data['question'],normalized_query=data.get('rerank_query',data['question'])),
         snapshot=SimpleNamespace(corpus_hash=data['corpus_hash'],sources=tuple(SimpleNamespace(**s) for s in data['sources']),
                                  approved_ids=tuple(data['approved_ids'])),
         candidates=tuple(EvidenceChunk(c['id'],ChunkDraft(**c['draft']),c['rank'],c['score']) for c in data['candidates']))
@@ -103,6 +104,7 @@ class EvidenceSteps:
         else:allowed=self.policy.allows(result)
         gate={'allowed':allowed,'reason':'' if allowed else '检索证据为空或低于校准门槛',
               'strategy':result.strategy,'top_score':result.candidates[0].score if result.candidates else None,
+              'rerank_query':result.understanding.normalized_query,
               'policy_hash':policy_hash}
         if not allowed:
             return {'gate':gate,'evidence':{},'answer':LOW_CONFIDENCE_REPLY,'actions':[],

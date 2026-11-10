@@ -78,7 +78,8 @@ async def collect(output,split='calibration',settings=None):
                 queries=(await QuerySteps(gateway,settings,deadline=deadline,observer=observer).expand(state))['queries']
             result=await asyncio.to_thread(runtime.retrieve_policy,case['question'],queries=tuple(queries),mode=case['mode'],deadline=deadline)
             if result.snapshot.corpus_hash!=snapshot.corpus_hash:raise ValueError('active corpus changed; discard run')
-            row.update(queries=queries,candidate_id=result.candidates[0].id if result.candidates else None,
+            row.update(queries=queries,rerank_query=result.understanding.normalized_query,
+                       candidate_id=result.candidates[0].id if result.candidates else None,
                        score=result.candidates[0].score if result.candidates else None,
                        candidates=[{'id':c.id,'score':c.score,'question':c.draft.questions,'text':c.draft.answer} for c in result.candidates])
             if split=='test':

@@ -1,0 +1,16 @@
+{"id": "feedback-holdout-policy_single-01", "mode": "policy_single", "question": "商品有破损少件，退换货运费该谁出", "expected_allowed": true}
+{"id": "feedback-holdout-policy_single-02", "mode": "policy_single", "question": "签收第五天的普通非定制保温杯，商品完好可以无理由退货吗", "expected_allowed": true}
+{"id": "feedback-holdout-policy_single-03", "mode": "policy_single", "question": "换货想改为别的颜色，是否先退后买", "expected_allowed": true}
+{"id": "feedback-holdout-policy_single-04", "mode": "policy_single", "question": "换货不是质量问题，双向运费谁支付", "expected_allowed": true}
+{"id": "feedback-holdout-policy_single-05", "mode": "policy_single", "question": "网游账号交易平台仲裁败诉退押金的规则", "expected_allowed": false}
+{"id": "feedback-holdout-policy_single-06", "mode": "policy_single", "question": "租赁合同提前退房押金抵扣违约金", "expected_allowed": false}
+{"id": "feedback-holdout-policy_single-07", "mode": "policy_single", "question": "国际货运码头集装箱返箱后滞箱费退款", "expected_allowed": false}
+{"id": "feedback-holdout-policy_single-08", "mode": "policy_single", "question": "体检套餐预约后医院退费挂号规则", "expected_allowed": false}
+{"id": "feedback-holdout-policy_multi-01", "mode": "policy_multi", "question": "商品有破损少件，退换货运费该谁出", "expected_allowed": true}
+{"id": "feedback-holdout-policy_multi-02", "mode": "policy_multi", "question": "签收第五天的普通非定制保温杯，商品完好可以无理由退货吗", "expected_allowed": true}
+{"id": "feedback-holdout-policy_multi-03", "mode": "policy_multi", "question": "换货想改为别的颜色，是否先退后买", "expected_allowed": true}
+{"id": "feedback-holdout-policy_multi-04", "mode": "policy_multi", "question": "换货不是质量问题，双向运费谁支付", "expected_allowed": true}
+{"id": "feedback-holdout-policy_multi-05", "mode": "policy_multi", "question": "网游账号交易平台仲裁败诉退押金的规则", "expected_allowed": false}
+{"id": "feedback-holdout-policy_multi-06", "mode": "policy_multi", "question": "租赁合同提前退房押金抵扣违约金", "expected_allowed": false}
+{"id": "feedback-holdout-policy_multi-07", "mode": "policy_multi", "question": "国际货运码头集装箱返箱后滞箱费退款", "expected_allowed": false}
+{"id": "feedback-holdout-policy_multi-08", "mode": "policy_multi", "question": "体检套餐预约后医院退费挂号规则", "expected_allowed": false}

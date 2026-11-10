@@ -147,3 +147,5 @@ API→WorkflowChatService→LangGraph/AgentSteps→原ToolRegistry/ModelGateway�
 ## Git 工作方式
 
 单人开发直接在 main 修改、验证和本地提交；按用户指示再推送 origin/main。默认不创建功能分支或 PR。提交前检查限定文件，保持 .env、.venv、artifacts、.superpowers 不入库；不强制推送、不删除数据卷。
+
+第六章人工E/H/O反馈修复、当前验证结果及用户确认保留的单一分数闸限制，见[反馈验证记录](docs/ch06-feedback-validation.md)；重测前使用更新后的[启动与人工指南](docs/ch06-manual-acceptance.md)重启旧worker。

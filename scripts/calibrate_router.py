@@ -45,8 +45,11 @@ def fit_policy(report,annotations,mode):
     def objective(threshold):
         tp=sum(label and score is not None and score>=threshold for score,label in samples)
         tn=sum(not label and (score is None or score<threshold) for score,label in samples)
-        return ((tp/positive+tn/negative)/2,threshold)
-    threshold=max([*scores,math.nextafter(scores[-1],math.inf)],key=objective)
+        # Same observed accuracy/false-positive rate: keep recall margin
+        # instead of placing the cutoff exactly on the weakest positive.
+        return ((tp/positive+tn/negative)/2,tn/negative,-threshold)
+    boundaries={*scores,*(math.nextafter(score,math.inf) for score in scores)}
+    threshold=max(boundaries,key=objective)
     return ConfidencePolicy(report['identities'][mode],{mode:threshold})
 
 
@@ -56,11 +59,13 @@ def require_scope(settings):
         raise ValueError('Use isolated 3308 retailq_test and Milvus19531')
 
 
-async def collect(output,split='calibration',settings=None):
+async def collect(output,split='calibration',settings=None,*,samples_path=None):
     settings=settings or Settings();require_scope(settings)
     target=new_output(output);database=Database(settings);runtime=None;gateway=None
-    rows=[json.loads(line) for line in (ROOT/f'evals/ch06_policy_{split}.jsonl').read_text(encoding='utf-8').splitlines() if line]
-    report={'split':split,'complete':False,'manifest':manifest(),'samples':rows,'rows':[],'identities':{}}
+    source=Path(samples_path) if samples_path else ROOT/f'evals/ch06_policy_{split}.jsonl'
+    rows=[json.loads(line) for line in source.read_text(encoding='utf-8').splitlines() if line]
+    report={'split':split,'complete':False,'manifest':manifest(),'samples':rows,
+            'sample_source_sha':sha256(source.read_bytes()).hexdigest(),'rows':[],'identities':{}}
     try:
         runtime=KnowledgeRuntime.open(settings,database);gateway=OpenAIModelGateway(settings)
         snapshot=runtime.corpus.active()
@@ -100,6 +105,7 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__);sub=parser.add_subparsers(dest='command',required=True)
     for name in ('collect','test'):
         p=sub.add_parser(name);p.add_argument('--output',required=True)
+        p.add_argument('--samples',help='Explicit frozen calibration or independent holdout JSONL')
         if name=='test':p.add_argument('--policies',required=True)
     p=sub.add_parser('fit');p.add_argument('--report',required=True);p.add_argument('--annotations',required=True);p.add_argument('--output',required=True)
     args=parser.parse_args(argv)
@@ -111,7 +117,7 @@ def main(argv=None):
         print('Both policy modes calibrated; source report and annotations retained.');return 0
     settings=Settings()
     if args.command=='test':settings=settings.model_copy(update={f'workflow_{mode}_confidence_path':str(Path(args.policies)/(mode+'.json')) for mode in MODES})
-    report=asyncio.run(collect(args.output,'test' if args.command=='test' else 'calibration',settings))
+    report=asyncio.run(collect(args.output,'test' if args.command=='test' else 'calibration',settings,samples_path=args.samples))
     print(json.dumps({'complete':report['complete'],'rows':len(report['rows']),'passed':report.get('passed')}))
     return 0 if report.get('passed',True) else 1
 

@@ -128,11 +128,18 @@ async def test_expand_original_is_deduplicated_only_with_two_real_queries():
     from retailq.workflow.query_processing import QuerySteps
     raw='订单001001申请无理由退货的时限要求'
     class Gateway:
-        values=(raw,'退货时限起算规则','退货商品状态与例外')
+        values=('退货时限起算规则',raw,'退货商品状态与例外')
         async def expand_query(self,*args,**kwargs):return self.values,None
     gateway=Gateway();steps=QuerySteps(gateway,Settings(_env_file=None))
     state={'resolved_question':raw,'agent':{}}
     result=await steps.expand(state)
     assert result['queries']==[raw,'退货时限起算规则','退货商品状态与例外']
-    gateway.values=(raw,'退货时限起算规则')
+    gateway.values=('退货时限起算规则',raw)
     with pytest.raises(ServiceError):await steps.expand(state)
+
+
+def test_canonical_duplicate_is_rejected_before_side_queries_can_take_its_identity():
+    from retailq.workflow.query_processing import effective_queries
+    raw='签收8天未拆封商品能否退货'
+    with pytest.raises(ServiceError):
+        effective_queries(raw,[raw,'退货申请流程与材料','退货运费如何承担'])

@@ -27,6 +27,19 @@ def test_calibration_uses_only_bound_calibration_labels():
     annotations={'report_sha':report_digest(report),'labels':[
         {'id':str(i),'mode':mode,'candidate_id':i,'relevant':i<6,'reason':'controlled relevance label'} for i in range(12)]}
     policy=fit_policy(report,annotations,mode)
-    assert policy.thresholds[mode]==.9
+    assert .1<policy.thresholds[mode]<.9
     with pytest.raises(ValueError):fit_policy({**report,'split':'test'},annotations,mode)
     with pytest.raises(ValueError):fit_policy(report,{**annotations,'report_sha':'stale'},mode)
+
+
+def test_calibration_ties_keep_same_observed_precision_with_positive_recall_margin():
+    from scripts.calibrate_router import fit_policy,report_digest
+    mode='policy_multi'
+    scores=[.6,.7,.8,.9,.62,.72,.05,.08,.11,.15,.12,.09]
+    rows=[{'id':str(i),'mode':mode,'score':score,'candidate_id':i} for i,score in enumerate(scores)]
+    report={'split':'calibration','complete':True,'rows':rows,'identities':{mode:{'strategy':mode}}}
+    annotations={'report_sha':report_digest(report),'labels':[
+        {'id':str(i),'mode':mode,'candidate_id':i,'relevant':i<6,'reason':'synthetic bound calibration relevance'} for i in range(12)]}
+    threshold=fit_policy(report,annotations,mode).thresholds[mode]
+    assert max(scores[6:])<threshold<min(scores[:6])
+    assert threshold==__import__('math').nextafter(max(scores[6:]),float('inf'))

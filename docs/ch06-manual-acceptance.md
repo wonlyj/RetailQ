@@ -30,8 +30,8 @@ $env:KNOWLEDGE_ENABLED = 'true'
 $env:KNOWLEDGE_SCHEDULE_ENABLED = 'false'
 $env:RERANK_REUSE_EMBEDDING_KEY = 'true'
 $env:RAG_CONFIDENCE_PATH = 'artifacts/ch04-eval-knowledge/rag-confidence-relevance-v2.json'
-$env:WORKFLOW_POLICY_SINGLE_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-e/policy_single.json'
-$env:WORKFLOW_POLICY_MULTI_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-e/policy_multi.json'
+$env:WORKFLOW_POLICY_SINGLE_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-feedback-b/policy_single.json'
+$env:WORKFLOW_POLICY_MULTI_CONFIDENCE_PATH = 'artifacts/evals/ch06/policies-20261110-feedback-b/policy_multi.json'
 $env:WORKFLOW_CHECKPOINT_PATH = 'artifacts/ch06-acceptance/checkpoints.sqlite'
 
 Test-Path $env:RAG_CONFIDENCE_PATH
@@ -44,7 +44,7 @@ Test-Path $env:WORKFLOW_POLICY_MULTI_CONFIDENCE_PATH
 
 三个Test-Path都应True；第六章迁移显示`Chapter six ticket enum migration verified.`。迁移可重复核查，不清空旧工单/对话。上面的artifacts路径是本机已准备的验收材料；不能通过创建同名空文件来替代策略。
 
-若18806已被本次服务占用，先复用该服务；需要重启时在原窗口Ctrl+C，再运行最后一条命令。不终止未知进程，不使用`down -v`。
+本次人工反馈修复后必须重启旧服务：在原窗口Ctrl+C，重新执行窗口A的整段命令，加载新的B策略路径；不要只复制最后一条uvicorn或复用旧worker。不终止未知进程，不使用`down -v`。
 
 ## 2. 打开前端（PowerShell窗口B）
 
@@ -55,6 +55,10 @@ Start-Process 'http://127.0.0.1:18806/'
 建议新建一个对话。订单1001、1002、001001为固定演示目录，001001与1001不同；物流仍是随机演示数据，不比较两次物流位置是否相同。浏览器使用本地演示身份，不需要登录或填写手机号。
 
 ## 3. 必测项目
+
+2026-11-10人工反馈E/H/O已修复并在独立浏览器实测；请重启后新建对话优先重测这三项。E第二轮应有退货政策引用及条件判断，H应有换货政策引用与必要澄清，O选1002后应按1002回答。未知商品状态仍需澄清，不承诺必退。
+
+仍保留单一分数闸：原16条回归13/16、新16条留出14/16，可能误拒或误放；用户已确认保持此方案并明确限制，不新增LLM语义闸。详见仓库docs/ch06-feedback-validation.md。
 
 | 编号 | 操作 | 预期 |
 | --- | --- | --- |

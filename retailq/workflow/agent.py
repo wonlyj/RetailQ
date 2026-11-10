@@ -60,6 +60,23 @@ class AgentSteps:
         agent['usage'] = ledger.snapshot()
         return agent, ledger, reservation, cap
 
+    def _fit_history(self,state,*,tools):
+        messages=list(state['messages'])
+        question=state.get('resolved_question',state.get('raw_question'))
+        current=next((i for i in range(len(messages)-1,-1,-1)
+                      if messages[i].type=='human' and messages[i].content==question),None)
+        if current is None:return messages
+        extra=self.schema_cost if tools else 0
+        # Drop whole older user turns only. Current resolved input, evidence,
+        # tool-call/result pairs and trailing control instructions stay intact.
+        while estimate_tokens(messages)+extra>self.settings.input_budget:
+            older=next((i for i in range(current) if messages[i].type=='human'),None)
+            if older is None:break
+            end=next(i for i in range(older+1,current+1) if messages[i].type=='human')
+            messages=messages[:older]+messages[end:]
+            current-=end-older
+        return messages
+
     def limited(self, state, *, repeated=False):
         answer = '检测到重复查询，已停止本轮循环，请补充信息或选择人工协助。' if repeated else LIMIT_ANSWER
         self.emit(ChatEvent('token',{'text':answer}))
@@ -77,6 +94,7 @@ class AgentSteps:
                 '若缺少工具所需ID，不能猜测，才返回动作JSON让下一阶段追问。只把成功回执当作已获取事实。')
             decision_state['messages'][-1]=SystemMessage(content=DECISION_STAGE+required)
         restricted=state.get('route') in ('core','other')
+        decision_state['messages']=self._fit_history(decision_state,tools=not restricted)
         try: agent, ledger, reservation, cap = self._reserve(decision_state, tools=not restricted, stage='agent_decision')
         except BudgetExceeded: return self.limited(state)
         async with asyncio.timeout(max(0,self.deadline-time.monotonic())):
@@ -132,7 +150,7 @@ class AgentSteps:
         if state.get('route')=='core':instruction+='订单和政策已由流程确认，只判断本单条件；未知商品状态或缺材料应条件化说明或必要澄清。商品名称不能证明非定制、商品完好或不影响二次销售；未知字段保留条件，不可默认满足。只使用本轮引用条款明示的资格条件，未检索到的时限、运费或例外不可用常识补齐；条款未写包装、吊牌或配件要求时不得自行追加。不要追问订单号、退款原因，不把未知字段当事实，不承诺已退款。'
         if state.get('route')=='core':instruction+=f'当前服务本地日期为{date.today().isoformat()}。涉及时限时按该日期与订单记录说明；若用户口述的天数与记录不一致，明确指出并请用户核实，只给分别成立时的条件判断，不直接断定该单可退或不可退。'
         if state.get('route')=='other':instruction+='当前诉求不明确或超出购物客服范围，只作简短澄清或范围说明，不声称已查询业务。'
-        final_messages = [*state['messages'],SystemMessage(content=instruction)]
+        final_messages = self._fit_history({**state,'messages':[*state['messages'],SystemMessage(content=instruction)]},tools=False)
         working = {**state,'messages':final_messages}
         try: agent, ledger, reservation, cap = self._reserve(working,tools=False,stage='agent_answer')
         except BudgetExceeded: return self.limited(state)

@@ -19,6 +19,35 @@ async def test_bare_demo_explains_serial_tool_steps_to_the_model(monkeypatch):
     assert await demo_agent_loop.run(Namespace(mode='controlled',question='先查订单再查物流'))==0
 
 
+@pytest.mark.parametrize('stage',['decide','answer'])
+async def test_long_previous_refund_turn_cannot_block_current_logistics_receipt(stage):
+    from types import SimpleNamespace
+    from langchain_core.messages import AIMessage,ToolMessage
+    from retailq.workflow.agent import AgentSteps
+    from retailq.workflow.contracts import AgentDecision
+    current='订单1001的物流在哪里'
+    pair=[AIMessage(content='',tool_calls=[{'id':'now','name':'query_logistics','args':{'order_id':'1001'}}]),
+          ToolMessage(content='{"ok":true,"data":{"order_id":"1001","status":"已签收"}}',tool_call_id='now')]
+    captured=[]
+    class Gateway:
+        async def decide_agent(self,messages,*args,**kwargs):
+            captured.extend(messages);return AgentDecision(AIMessage(content='{"actions":[]}'),())
+        async def stream_answer(self,messages,**kwargs):
+            captured.extend(messages);yield SimpleNamespace(text='本轮物流为已签收。',finish_reason='stop',usage=None)
+    settings=Settings(_env_file=None)
+    steps=AgentSteps(Gateway(),build_registry(None,ToolContext(1,'alice'),settings),settings,lambda e:None)
+    state={'route':'business','raw_question':'还是先查刚才那单物流吧','resolved_question':current,
+           'messages':[SystemMessage(content='保留的系统规则'),HumanMessage(content='上一轮退款问题'),
+                       AIMessage(content='过去的退款政策长答复'*1000),HumanMessage(content=current),*pair],
+           'agent':{'step':1}}
+    patch=await getattr(steps,stage)(state)
+    assert patch['status']==('answer' if stage=='decide' else 'completed')
+    assert captured[0].content=='保留的系统规则'
+    assert any(m.type=='human' and m.content==current for m in captured)
+    assert [m for m in captured if m.type in ('ai','tool')]==pair
+    assert not any('过去的退款政策' in m.content for m in captured)
+
+
 async def test_final_answer_receives_exact_decided_button_availability():
     peer=WorkflowUpstream('zero',bad_actions='{"actions":[]}')
     state,_=await run_case(peer)
